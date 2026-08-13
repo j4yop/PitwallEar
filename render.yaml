@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: pitwallear
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: HF_TOKEN
+        sync: false
+      - key: PITWALLEAR_ALLOW_DOWNLOAD
+        value: "1"
+    autoDeploy: true
