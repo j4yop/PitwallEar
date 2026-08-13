@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pitwallear"
+version = "0.2.0"
+description = "Multi-agent F1 radio stress detection"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0,<0.116.0",
+    "uvicorn[standard]>=0.23.0",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.0.0",
+    "httpx>=0.25.0",
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+    "transformers>=4.40.0",
+    "torch>=2.0.0",
+    "pandas>=2.0.0",
+]
+
+# Audio (ASR + speech-emotion) and live FastF1 pace data are optional so the
+# core text/demo path installs with zero native or heavy extras.
+[project.optional-dependencies]
+audio = [
+    "soundfile>=0.12.0",
+    "librosa>=0.10.0",
+]
+pace = [
+    "fastf1>=3.1.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
