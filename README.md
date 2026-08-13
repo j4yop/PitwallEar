@@ -182,9 +182,4 @@ and are used for reference only. Race data comes from the public FastF1 and
 OpenF1 APIs and is used for educational purposes. This project is not
 affiliated with Formula 1, the FIA, or any team.
 
-## Credits
 
-The multi-agent orchestration pattern is inspired by
-[F1 StratLab](https://github.com/VforVitorio/F1-StratLab) by Víctor Vega
-Sobral. This project targets a different problem (driver stress from radio)
-and is an independent implementation.
