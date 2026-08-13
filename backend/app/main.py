@@ -168,6 +168,19 @@ async def analyse(
 
 
 # Serve the built React app so the Hugging Face Space is a single process.
-_BUILT_APP = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-if _BUILT_APP.exists():
+# In the Docker image the layout is /app/backend and /app/frontend/dist; in a
+# local dev checkout it is PitwallEar/backend and PitwallEar/frontend/dist.
+def _resolve_built_app() -> Path | None:
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+        Path("/app/frontend/dist"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+_BUILT_APP = _resolve_built_app()
+if _BUILT_APP is not None:
     app.mount("/", StaticFiles(directory=str(_BUILT_APP), html=True), name="app")

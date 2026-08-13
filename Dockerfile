@@ -14,10 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY backend/ ./backend/
-COPY frontend/dist ./frontend/dist
+COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 WORKDIR /app/backend
-RUN pip install --no-cache-dir -e ".[pace]"
+RUN pip install --no-cache-dir -e ".[pace,audio]"
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 7860
