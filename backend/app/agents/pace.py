@@ -45,7 +45,13 @@ class PaceAgent:
             # Keep laps with a plausible race lap time; skip in/out laps and
             # pit/safety-car outliers so the correlation is against genuine pace.
             if seconds is not None and 60 <= seconds <= 120:
-                points.append(LapPoint(lap=int(row["LapNumber"]), lap_time_s=seconds))
+                points.append(
+                    LapPoint(
+                        lap=int(row["LapNumber"]),
+                        lap_time_s=seconds,
+                        lap_start=str(row.get("LapStartTime") or ""),
+                    )
+                )
         return points
 
     def analyse(self, driver: str, gp: str, year: int) -> PaceResult:

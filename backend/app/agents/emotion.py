@@ -17,6 +17,7 @@ use (needed for the real audio/text model paths).
 
 from __future__ import annotations
 
+import math
 import os
 import tempfile
 
@@ -60,6 +61,27 @@ _CALM_WORDS = {
     "fine", "good", "okay", "ok", "calm", "happy", "great", "nice",
     "understood", "copy", "clear", "steady",
 }
+
+# Domain temperature for confidence calibration. Raw softmax confidences from
+# speech/text emotion models are typically overconfident; a temperature > 1
+# softens them. This is a fixed, documented approximation, not a fitted
+# per-model calibration (which would require a labelled validation set).
+_EMOTION_TEMPERATURE = 1.5
+
+
+def calibrate_confidence(raw: float) -> float:
+    """Approximate calibrated confidence via temperature-scaled softmax.
+
+    For a two-class softmax with a top probability ``raw``, applying temperature
+    ``T`` maps it to ``exp(logit(raw)/T) / (1 + exp(logit(raw)/T))``.
+    """
+    if raw <= 0.0:
+        return 0.0
+    if raw >= 1.0:
+        return 1.0
+    logit = math.log(raw / (1.0 - raw))
+    scaled = math.exp(logit / _EMOTION_TEMPERATURE)
+    return round(scaled / (1.0 + scaled), 3)
 
 
 class EmotionAgent:
@@ -123,10 +145,12 @@ class EmotionAgent:
             raw_label = top.get("label", "neutral").lower()
             confidence = float(top.get("score", 0.0))
             mood = self._audio_to_mood(raw_label)
-            reasoning = self._audio_reasoning(raw_label, confidence)
+            calibrated = calibrate_confidence(confidence)
+            reasoning = self._audio_reasoning(raw_label, calibrated)
             return EmotionResult(
                 mood=mood,
                 confidence=confidence,
+                calibrated_confidence=calibrated,
                 model=self.audio_model,
                 reasoning=reasoning,
             )
@@ -171,10 +195,12 @@ class EmotionAgent:
             raw_label = top.get("label", "").lower()
             confidence = float(top.get("score", 0.0))
             mood = self._text_to_mood(raw_label)
-            reasoning = self._text_reasoning(raw_label, confidence)
+            calibrated = calibrate_confidence(confidence)
+            reasoning = self._text_reasoning(raw_label, calibrated)
             return EmotionResult(
                 mood=mood,
                 confidence=confidence,
+                calibrated_confidence=calibrated,
                 model=self.text_model,
                 reasoning=reasoning,
             )
@@ -184,6 +210,7 @@ class EmotionAgent:
             return EmotionResult(
                 mood=mood,
                 confidence=confidence,
+                calibrated_confidence=calibrate_confidence(confidence),
                 model="keyword-fallback",
                 reasoning=reasoning,
             )

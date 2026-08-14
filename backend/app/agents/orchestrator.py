@@ -213,4 +213,10 @@ class Orchestrator:
 
     @staticmethod
     def _confidence(emotion: EmotionResult) -> float:
+        """Confidence for the final call, preferring calibrated probability.
+
+        Falls back to the raw confidence floor of 0.5 when calibration is absent.
+        """
+        if emotion.calibrated_confidence is not None:
+            return round(max(0.5, emotion.calibrated_confidence), 3)
         return round(max(0.5, emotion.confidence), 3)
