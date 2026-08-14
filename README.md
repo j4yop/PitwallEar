@@ -7,11 +7,19 @@ before they show up in the lap times.**
 Built for Hackathon Problem Statement 1: *"The Silent Co-Driver: Reading Driver
 Stress from Radio Calls."*
 
-PitwallEar goes beyond transcribe-and-label. Its two novel contributions are a
-**cross-model agreement check** (does *how* the driver speaks match *what* they
-say?) and a **lagged stress-pace correlation** (does mood change *before*
-pace?). The latter is the early-warning property that makes a co-driver useful,
-not just descriptive.
+PitwallEar goes beyond transcribe-and-label. Its three novel contributions are:
+
+1. **Cross-model agreement** — does *how* the driver speaks match *what* they
+   say?
+2. **Causal lead-lag inference** — does mood change *before* pace, tested with
+   Granger causality and transfer entropy, not just Pearson correlation?
+3. **A pooled significance layer** — aggregating paired mood-vs-pace samples
+   across many races so the early-warning claim is *demonstrated*, not just
+   theoretical.
+
+The result is a co-driver that reports a **risk lead-time** ("we detect stress N
+laps before a pace drop") with calibrated confidence and an honest list of where
+the analysis could be wrong.
 
 ---
 
@@ -67,7 +75,7 @@ sector times. PitwallEar turns that intuition into a measurable signal:
 
 ---
 
-## The two novel ideas
+## The three novel ideas
 
 ### 1. Cross-model agreement
 
@@ -83,16 +91,36 @@ The agreement score is a distance-weighted match between the two mood labels,
 with a confidence floor so low-confidence readings never masquerade as strong
 agreement.
 
-### 2. Lagged stress-pace correlation
+### 2. Causal lead-lag inference
 
-A single mood label is not actionable. What matters is whether mood **predicts**
-pace. PitwallEar aligns a real per-lap mood timeline with lap-time deltas
-(computed from the driver's own session mean, so circuit and compound baselines
-are removed) and searches over a small lag window:
+A single mood label is not actionable. What matters is whether mood **causes**
+pace changes or merely reacts to them. PitwallEar aligns a real per-lap mood
+timeline with lap-time deltas (computed from the driver's own session mean, so
+circuit and compound baselines are removed) and runs two causal tests:
 
-- **Negative lag** → mood changes before pace (early-warning).
-- **Positive lag** → pace changes before mood (mood is a response).
-- **Zero lag** → they move together.
+- **Granger causality** — does the driver's mood history improve prediction of
+  pace beyond pace's own history?
+- **Transfer entropy** — does knowing the driver's mood reduce uncertainty about
+  pace, without assuming linearity?
+
+The output is a **risk lead-time**: how many laps before a pace change the
+signal appears, with a calibrated confidence. A negative lag means mood leads
+pace (early-warning); a positive lag means mood is a response.
+
+### 3. Pooled multi-race significance
+
+A single race rarely has enough radio-labelled laps for statistical significance
+(typically `n < 10`). PitwallEar persists every paired mood-vs-pace sample in a
+SQLite store and runs the causal analysis on the **pooled corpus** across many
+drivers and Grands Prix. That turns a single-race anecdote into a demonstrated
+result with real sample sizes.
+
+### Honest explainability
+
+Every signal ships with the evidence behind it: the transcript, the audio/text
+moods, the agreement reasoning, the pace reasoning, the causal reasoning, and a
+self-aware list of failure modes (domain mismatch, small sample, low calibrated
+confidence, unavailable data). The co-driver is auditable, not a black box.
 
 The result is a Pearson coefficient with a two-sided p-value and a best lag,
 computed on real data — not a canned "stress detected" sticker.
@@ -238,9 +266,14 @@ lap times.
 | `GET` | `/timeline` | Per-lap radio mood timeline for a driver (query: `driver`, `gp`, `year`). |
 | `POST` | `/analyse-text` | Text-only pipeline. Body: `{ text, driver, gp, year }`. |
 | `POST` | `/analyse` | Audio pipeline. Multipart: `audio`, `driver`, `gp`, `year`. |
+| `GET` | `/aggregation` | Pooled multi-race causal lead-lag result. |
+| `GET` | `/aggregation/clear` | Clear the persistent aggregation store. |
+| `GET` | `/live` | Near-real-time replay snapshot for a driver's latest laps. |
 
 All analysis endpoints return an `AnalysisResponse` with `transcription`,
-`emotion`, `pace`, `insight`, optional `agreement`, and optional `correlation`.
+`emotion` (with calibrated confidence), `pace`, `insight`, optional `agreement`,
+optional `correlation` (with causal lead-lag and risk lead-time), and an
+`explainability` artifact.
 
 ---
 
@@ -325,21 +358,31 @@ Open **http://localhost:7860**.
 
 ## Limitations and future work
 
-The pipeline is fully end-to-end on real data, but a single race does not
-contain enough radio messages to reach statistical significance for the
-stress-pace correlation (typically `n < 10` paired laps). This is a data-volume
-limitation, not a method limitation.
+The single-race sample-size limitation has been addressed with a persistent
+multi-race aggregation layer (`/aggregation`), which pools every paired
+mood-vs-pace sample across drivers and Grands Prix before running the causal
+test.
 
-Planned improvements:
+Live mode is a hybrid:
 
-1. **Multi-race batch runner** — aggregate mood-vs-pace pairs across many
-   drivers and Grands Prix to reach a statistically significant sample.
-2. **Streaming audio path** — process a live radio feed instead of a single
-   clip.
-3. **Per-lap audio alignment** — map each radio clip to its exact lap using
-   OpenF1 timestamps rather than a nominal lap-length estimate.
-4. **Calibrated emotion confidence** — replace raw model probabilities with
-   calibrated scores for the final co-driver call.
+- **Live pace** — sourced from FastF1, which reads F1's official live timing
+  data and refreshes during an active session.
+- **Radio audio** — near-real-time replay of the most recent complete session.
+  OpenF1's *live* audio tier is sponsor-gated; the free tier serves historical
+  data. The streaming endpoint labels this explicitly rather than pretending
+  the audio is live when it is not.
+
+Remaining limitations:
+
+1. **Live radio audio** — true mid-race radio ingestion requires OpenF1's
+   sponsor tier (live REST/MQTT/WebSocket). The current path is the honest
+   near-real-time fallback.
+2. **Calibration quality** — emotion confidence uses a fixed temperature
+   scaling, which is a documented approximation. A fitted per-model calibration
+   would require a labelled validation set of in-car radio clips.
+3. **Emotion model domain** — the speech-emotion model was not trained on
+   engine-noise radio; domain mismatch remains a source of error that the
+   explainability panel flags rather than hides.
 
 ---
 
