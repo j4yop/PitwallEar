@@ -14,6 +14,7 @@ class TranscriptionResult(BaseModel):
 
     text: str
     model: str = ""
+    segments: list[dict] = Field(default_factory=list)
 
 
 class EmotionResult(BaseModel):
@@ -21,6 +22,7 @@ class EmotionResult(BaseModel):
 
     mood: Mood
     confidence: float = Field(ge=0.0, le=1.0)
+    calibrated_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     model: str = ""
     reasoning: str = ""
 
@@ -30,6 +32,7 @@ class LapPoint(BaseModel):
 
     lap: int
     lap_time_s: float | None = None
+    lap_start: str | None = None
 
 
 class PaceResult(BaseModel):
@@ -65,28 +68,61 @@ class MoodPoint(BaseModel):
     lap: int
     mood: Mood
     confidence: float = Field(ge=0.0, le=1.0)
+    calibrated_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     source: str = ""
+    transcript: str = ""
+    clip_url: str = ""
+
+
+class CausalResult(BaseModel):
+    """Causal lead-lag analysis: does mood actually lead pace?"""
+
+    method: str
+    statistic: float
+    p_value: float
+    best_lag: int
+    direction: str
+    sample_size: int
+    reasoning: str
 
 
 class CorrelationResult(BaseModel):
-    """Stress-lap correlation: does mood actually predict pace?
+    """Stress-lap correlation with causal lead-lag and calibration.
 
     ``correlation`` is the Pearson coefficient between the per-lap mood score
     (numeric: Calm=1, Neutral=2, Tired=3, Stressed=4) and the lap-time delta
     from the driver's own session mean. ``best_lag`` is the lag (in laps) at
     which mood best predicts pace; a negative lag means mood leads pace (mood
     changes before lap time changes), which is the meaningful direction for an
-    early-warning co-driver.
+    early-warning co-driver. ``causal`` carries the Granger/transfer-entropy
+    result and ``risk_lead_time_laps`` is the lead-time headline metric.
     """
 
-    correlation: float | None = Field(ge=-1.0, le=1.0)
+    correlation: float | None = Field(default=None, ge=-1.0, le=1.0)
     best_lag: int = 0
     p_value: float | None = None
-    sample_size: int
+    sample_size: int = 0
     mood_timeline: list[MoodPoint] = Field(default_factory=list)
     stress_laps: list[LapPoint] = Field(default_factory=list)
     non_stress_laps: list[LapPoint] = Field(default_factory=list)
     reasoning: str = ""
+    causal: CausalResult | None = None
+    risk_lead_time_laps: int | None = None
+    lead_time_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class Explainability(BaseModel):
+    """Human-inspectable artifacts backing every signal."""
+
+    transcript: str = ""
+    audio_mood: Mood | None = None
+    text_mood: Mood | None = None
+    agreement_reason: str = ""
+    pace_reason: str = ""
+    causal_reason: str = ""
+    waveform_available: bool = False
+    prosody_features: dict = Field(default_factory=dict)
+    failure_modes: list[str] = Field(default_factory=list)
 
 
 class AnalysisResponse(BaseModel):
@@ -98,3 +134,4 @@ class AnalysisResponse(BaseModel):
     insight: Insight
     agreement: AgreementResult | None = None
     correlation: CorrelationResult | None = None
+    explainability: Explainability | None = None
