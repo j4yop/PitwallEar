@@ -49,6 +49,23 @@ _orchestrator = Orchestrator()
 _timeline = RadioTimelineAgent(_emotion)
 
 
+@app.on_event("startup")
+def _warm_up_models() -> None:
+    """Pre-load the text emotion model so the first /analyse-text request is fast.
+
+    The text pipeline is the one the Demo/Text paths depend on; without a warm-up
+    the first request triggers a 30-40s model download/load inside the handler,
+    which surfaces as a proxy timeout (502) in the frontend. The model is loaded
+    here, in the background, so a slow download never blocks startup.
+    """
+    try:
+        _emotion._load_text()
+    except Exception:
+        # Cache-only mode can legitimately fail on a cold machine; the request
+        # path will then fall back to the keyword classifier.
+        pass
+
+
 class TextRequest(BaseModel):
     text: str
     driver: str = "VER"

@@ -21,7 +21,7 @@ import json
 import os
 import tempfile
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.agents.emotion import EmotionAgent
 from app.agents.transcription import TranscriptionAgent
@@ -72,8 +72,9 @@ class RadioTimelineAgent:
     def _fetch_lap_starts(driver: str, gp: str, year: int) -> list[tuple[int, datetime]]:
         """Return ``(lap_number, lap_start_time)`` pairs from FastF1.
 
-        Falls back to an empty list when FastF1 or the session is unavailable;
-        the caller then returns an empty timeline instead of guessing.
+        FastF1's ``LapStartTime`` is a ``Timedelta`` measured from the session
+        start; convert it to an absolute UTC datetime by adding the session's
+        ``SessionStartTime``.
         """
         import fastf1
 
@@ -81,15 +82,27 @@ class RadioTimelineAgent:
         session.load(laps=True, telemetry=False, weather=False, messages=False)
         laps = session.laps.pick_drivers(driver)
 
+        # FastF1 stores the session date and a start time offset separately:
+        # `session.date` is the date (often with the session start time), and
+        # `session.session_start_time` is a timedelta offset.
+        session_start = session.session_start_time
+        if isinstance(session_start, timedelta):
+            base = session.date
+            if hasattr(base, "to_pydatetime"):
+                base = base.to_pydatetime()
+            if base.tzinfo is None:
+                base = base.replace(tzinfo=timezone.utc)
+            session_start = base + session_start
+        elif session_start.tzinfo is None:
+            session_start = session_start.replace(tzinfo=timezone.utc)
+
         starts: list[tuple[int, datetime]] = []
         for _, row in laps.iterrows():
             lap = int(row.get("LapNumber"))
             ts = row.get("LapStartTime")
-            if ts is not None:
-                # FastF1 LapStartTime may be a pandas Timestamp or datetime.
-                dt = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
+            if ts is not None and hasattr(ts, "total_seconds"):
+                # LapStartTime is a Timedelta from session start.
+                dt = session_start + ts
                 starts.append((lap, dt))
         return sorted(starts, key=lambda x: x[0])
 
@@ -154,19 +167,37 @@ class RadioTimelineAgent:
 
     @staticmethod
     def _gp_country(gp: str) -> str:
-        """Map a GP name to OpenF1's country_name."""
+        """Map a GP name to OpenF1's country_name.
+
+        Handles both the common short names and FastF1's full official event
+        names. OpenF1 uses the country's English name with underscores for
+        multi-word countries.
+        """
+        gp_l = gp.lower()
         mapping = {
             "melbourne": "Australia",
             "australia": "Australia",
+            "australian grand prix": "Australia",
             "monaco": "Monaco",
+            "monaco grand prix": "Monaco",
             "monza": "Italy",
-            "silverstone": "Great Britain",
-            "british": "Great Britain",
+            "italian grand prix": "Italy",
+            "italy": "Italy",
+            "silverstone": "Great_Britain",
+            "british": "Great_Britain",
+            "british grand prix": "Great_Britain",
+            "great britain": "Great_Britain",
             "spa": "Belgium",
+            "belgian grand prix": "Belgium",
+            "belgium": "Belgium",
             "zandvoort": "Netherlands",
+            "dutch grand prix": "Netherlands",
+            "netherlands": "Netherlands",
             "suzuka": "Japan",
+            "japanese grand prix": "Japan",
+            "japan": "Japan",
         }
-        return mapping.get(gp.lower(), gp)
+        return mapping.get(gp_l, gp)
 
     @staticmethod
     def _parse_ts(date_str: str) -> datetime | None:
