@@ -10,6 +10,10 @@ export default defineConfig({
       "/analyse": "http://localhost:8000",
       "/analyse-text": "http://localhost:8000",
       "/health": "http://localhost:8000",
+      "/live": "http://localhost:8000",
+      "/live/stream": "http://localhost:8000",
+      "/aggregation": "http://localhost:8000",
+      "/aggregation/clear": "http://localhost:8000",
     },
   },
 });
