@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agents import EmotionAgent, Orchestrator, PaceAgent, TranscriptionAgent
+from app.agents.aggregation import (
+    all_samples,
+    build_rows_from_analysis,
+    clear_samples,
+    pooled_causal_analysis,
+)
+from app.agents.explainability import build_explainability
 from app.agents.radio_timeline import RadioTimelineAgent
 from app.schemas import (
     AnalysisResponse,
     CorrelationResult,
     EmotionResult,
+    Explainability,
     Insight,
     LapPoint,
     MoodPoint,
@@ -105,6 +115,10 @@ def demo() -> AnalysisResponse:
         transcription, audio_emotion, pace, text_emotion, demo_timeline
     )
 
+    explainability = build_explainability(
+        transcription, audio_emotion, pace, agreement, correlation
+    )
+
     return AnalysisResponse(
         transcription=transcription,
         emotion=audio_emotion,
@@ -112,6 +126,7 @@ def demo() -> AnalysisResponse:
         insight=insight,
         agreement=agreement,
         correlation=correlation,
+        explainability=explainability,
     )
 
 
@@ -127,6 +142,17 @@ async def analyse_text(req: TextRequest) -> AnalysisResponse:
         transcription, text_emotion, pace, text_emotion=None, timeline=timeline
     )
 
+    explainability = build_explainability(
+        transcription, text_emotion, pace, agreement, correlation
+    )
+
+    # Persist paired samples for the multi-race significance runner.
+    build_rows = build_rows_from_analysis(req.driver, req.gp, req.year, pace.laps, timeline)
+    if build_rows:
+        from app.agents.aggregation import add_samples
+
+        add_samples(build_rows)
+
     return AnalysisResponse(
         transcription=transcription,
         emotion=text_emotion,
@@ -134,6 +160,7 @@ async def analyse_text(req: TextRequest) -> AnalysisResponse:
         insight=insight,
         agreement=None,
         correlation=correlation,
+        explainability=explainability,
     )
 
 
@@ -157,6 +184,10 @@ async def analyse(
         transcription, audio_emotion, pace, text_emotion, timeline
     )
 
+    explainability = build_explainability(
+        transcription, audio_emotion, pace, agreement, correlation
+    )
+
     return AnalysisResponse(
         transcription=transcription,
         emotion=audio_emotion,
@@ -164,6 +195,82 @@ async def analyse(
         insight=insight,
         agreement=agreement,
         correlation=correlation,
+        explainability=explainability,
+    )
+
+
+@app.get("/aggregation", response_model=dict)
+def aggregation() -> dict:
+    """Return the pooled multi-race causal lead-lag result.
+
+    This is the significance layer: it aggregates every persisted paired sample
+    and tests whether mood leads pace across the pooled corpus rather than
+    relying on a single race's small sample.
+    """
+    rows = all_samples()
+    return pooled_causal_analysis(rows)
+
+
+@app.get("/aggregation/clear", response_model=dict)
+def aggregation_clear() -> dict:
+    clear_samples()
+    return {"status": "cleared"}
+
+
+@app.get("/live", response_model=dict)
+def live(driver: str = "VER", gp: str = "Melbourne", year: int = 2025) -> dict:
+    """Near-real-time replay snapshot for a driver's latest laps."""
+    from app.agents.live import live_snapshot
+
+    return live_snapshot(driver, gp, year)
+
+
+@app.get("/live/stream")
+async def live_stream(driver: str = "VER", gp: str = "Melbourne", year: int = 2025):
+    """Stream the growing mood timeline as Server-Sent Events.
+
+    Each event is a JSON payload with the mode, new-clip count, and the updated
+    timeline. The stream polls OpenF1 every few seconds and emits only when new
+    clips arrive. It falls back to a clearly-labelled near-real-time replay when
+    the session is not live.
+    """
+    import asyncio
+
+    from app.agents.live_stream import LiveStreamEngine
+
+    engine = LiveStreamEngine()
+
+    async def event_generator():
+        # Emit an initial heartbeat so the client knows the stream is live.
+        yield "event: init\ndata: {\"status\":\"streaming\"}\n\n"
+
+        while True:
+            try:
+                from app.agents.live import live_pace
+
+                pace_data = live_pace(driver, gp, year)
+                result = await engine.poll_once(driver, gp, year)
+                result["pace"] = pace_data
+                result["mode"] = "live" if pace_data["is_live"] else result["mode"]
+                yield (
+                    "event: update\n"
+                    f"data: {json.dumps(result)}\n\n"
+                )
+            except Exception as exc:
+                yield (
+                    "event: error\n"
+                    f"data: {{\"error\":\"{type(exc).__name__}\"}}\n\n"
+                )
+            await asyncio.sleep(5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
