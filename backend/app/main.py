@@ -58,12 +58,17 @@ def _warm_up_models() -> None:
     which surfaces as a proxy timeout (502) in the frontend. The model is loaded
     here, in the background, so a slow download never blocks startup.
     """
-    try:
-        _emotion._load_text()
-    except Exception:
-        # Cache-only mode can legitimately fail on a cold machine; the request
-        # path will then fall back to the keyword classifier.
-        pass
+    import threading
+
+    def _warm_up() -> None:
+        try:
+            _emotion._load_text()
+        except Exception:
+            # Cache-only mode can legitimately fail on a cold machine; the request
+            # path will then fall back to the keyword classifier.
+            pass
+
+    threading.Thread(target=_warm_up, daemon=True).start()
 
 
 class TextRequest(BaseModel):
