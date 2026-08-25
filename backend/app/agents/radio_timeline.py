@@ -21,8 +21,13 @@ import json
 import os
 import tempfile
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
+import pandas as pd
+
+from app.agents._caches import TranscriptCache
 from app.agents.emotion import EmotionAgent
 from app.agents.transcription import TranscriptionAgent
 from app.schemas import MoodPoint
@@ -47,6 +52,7 @@ class RadioTimelineAgent:
         self._emotion = emotion_agent or EmotionAgent()
         self._transcription = transcription_agent or TranscriptionAgent()
         self._cache: dict[tuple[str, str, int], list[MoodPoint]] = {}
+        self._transcripts = TranscriptCache()
 
     def build_timeline(self, driver: str, gp: str, year: int) -> list[MoodPoint]:
         """Return per-lap mood points for a driver in a Grand Prix."""
@@ -59,7 +65,10 @@ class RadioTimelineAgent:
             clips = self._fetch_radio_clips(driver, gp, year)
             timeline = self._label_clips(clips, lap_starts)
         except Exception:
-            timeline = []
+            # Transient upstream failure: return an empty timeline but do NOT
+            # cache it, so the next request retries instead of being poisoned
+            # until restart.
+            return []
 
         self._cache[key] = timeline
         return timeline
@@ -78,6 +87,9 @@ class RadioTimelineAgent:
         """
         import fastf1
 
+        from app.agents._caches import ensure_fastf1_cache
+
+        ensure_fastf1_cache()
         session = fastf1.get_session(year, gp, "R")
         session.load(laps=True, telemetry=False, weather=False, messages=False)
         laps = session.laps.pick_drivers(driver)
@@ -100,10 +112,14 @@ class RadioTimelineAgent:
         for _, row in laps.iterrows():
             lap = int(row.get("LapNumber"))
             ts = row.get("LapStartTime")
-            if ts is not None and hasattr(ts, "total_seconds"):
-                # LapStartTime is a Timedelta from session start.
-                dt = session_start + ts
-                starts.append((lap, dt))
+            if ts is None or not hasattr(ts, "total_seconds"):
+                continue
+            if pd.isna(ts):
+                # NaT lap starts would misalign every clip to the final lap.
+                continue
+            # LapStartTime is a Timedelta from session start.
+            dt = session_start + ts
+            starts.append((lap, dt))
         return sorted(starts, key=lambda x: x[0])
 
     @staticmethod
@@ -134,24 +150,32 @@ class RadioTimelineAgent:
             return json.loads(resp.read().decode())
 
     @staticmethod
-    def _driver_number(driver: str) -> int:
-        """Map a 3-letter code (VER) to a driver number (1)."""
+    def _driver_number(driver: str) -> int | None:
+        """Map a 3-letter code (VER) to a driver number (1).
+
+        Returns None for unmapped codes: guessing a number would silently
+        analyse a different driver's radio.
+        """
         static = {"VER": 1, "NOR": 4, "LEC": 16, "HAM": 44, "RUS": 63,
                   "PIA": 81, "SAI": 55, "ALO": 14, "GAS": 10, "OCO": 31,
                   "TSU": 22, "ALB": 23, "LAW": 30, "STR": 18, "MAG": 20,
                   "BOT": 77, "HUL": 27, "ZHO": 24, "COL": 6, "DOO": 2}
-        return static.get(driver.upper(), 1)
+        return static.get(driver.upper())
 
     def _fetch_radio_clips(self, driver: str, gp: str, year: int) -> list[dict]:
         """Return ``(timestamp, recording_url)`` dicts for a driver's radio."""
         sessions = self._get_json(
-            f"/sessions?year={year}&country_name={self._gp_country(gp)}&session_name=Race"
+            f"/sessions?year={int(year)}"
+            f"&country_name={quote(self._gp_country(gp))}&session_name=Race"
         )
         if not sessions:
             return []
 
         session_key = sessions[0]["session_key"]
         driver_number = self._driver_number(driver)
+        if driver_number is None:
+            # Unknown driver code — refuse to fetch another driver's radio.
+            return []
         clips = self._get_json(
             f"/team_radio?session_key={session_key}&driver_number={driver_number}"
         )
@@ -222,9 +246,12 @@ class RadioTimelineAgent:
 
         A clip is only kept when its timestamp maps to a real lap via FastF1's
         lap start times; otherwise it is dropped rather than assigned by a
-        nominal guess.
+        nominal guess. Downloads run concurrently (they are network-bound);
+        transcription/classification stays sequential because the transformers
+        pipelines are not guaranteed thread-safe.
         """
-        per_lap: dict[int, list[MoodPoint]] = {}
+        # Map each clip to a lap first, so only in-lap clips are downloaded.
+        downloadable: list[tuple[int, str]] = []
         for clip in clips:
             ts = self._parse_ts(clip["timestamp"])
             if ts is None:
@@ -232,38 +259,58 @@ class RadioTimelineAgent:
             lap = self._lap_for_timestamp(ts, lap_starts)
             if lap is None:
                 continue
+            downloadable.append((lap, clip["recording_url"]))
 
-            url = clip["recording_url"]
+        # Concurrent download with per-clip failure tolerance.
+        def _fetch(url: str) -> bytes | None:
             try:
-                # Download the MP3 to a temp file, then transcribe.
                 req = urllib.request.Request(url, headers=_HEADERS)
                 with urllib.request.urlopen(req, timeout=60) as resp:
-                    audio_bytes = resp.read()
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                    tmp.write(audio_bytes)
-                    tmp_path = tmp.name
+                    return resp.read()
+            except Exception:
+                return None
 
-                transcription = self._transcription.transcribe(tmp_path)
-                os.unlink(tmp_path)
+        if downloadable:
+            workers = min(4, len(downloadable))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                blobs = list(pool.map(lambda u: _fetch(u), [u for _, u in downloadable]))
+        else:
+            blobs = []
 
+        per_lap: dict[int, list[MoodPoint]] = {}
+        for (lap, url), audio_bytes in zip(downloadable, blobs):
+            if not audio_bytes:
+                continue
+
+            text = self._transcripts.get(url)
+            if text is None:
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                        tmp.write(audio_bytes)
+                        tmp_path = tmp.name
+                    transcription = self._transcription.transcribe(tmp_path)
+                    os.unlink(tmp_path)
+                except Exception:
+                    continue
                 text = transcription.text.strip()
                 if not text:
                     continue
-                emotion = self._emotion.classify_text(text)
+                # Only cache successful transcripts; clips are immutable so
+                # the text never goes stale.
+                self._transcripts.put(url, text)
 
-                per_lap.setdefault(lap, []).append(
-                    MoodPoint(
-                        lap=lap,
-                        mood=emotion.mood,
-                        confidence=emotion.confidence,
-                        calibrated_confidence=emotion.calibrated_confidence,
-                        source="openf1-radio",
-                        transcript=text,
-                        clip_url=url,
-                    )
+            emotion = self._emotion.classify_text(text)
+            per_lap.setdefault(lap, []).append(
+                MoodPoint(
+                    lap=lap,
+                    mood=emotion.mood,
+                    confidence=emotion.confidence,
+                    calibrated_confidence=emotion.calibrated_confidence,
+                    source="openf1-radio",
+                    transcript=text,
+                    clip_url=url,
                 )
-            except Exception:
-                continue
+            )
 
         # One mood per lap, taking the most negative (conservative for stress).
         timeline: list[MoodPoint] = []

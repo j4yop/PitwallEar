@@ -22,6 +22,7 @@ class TranscriptionAgent:
     def __init__(self, model_name: str | None = None) -> None:
         self.model_name = model_name or settings.asr_model
         self._pipeline = None
+        self._load_failed = False
 
     @staticmethod
     def _allow_download() -> bool:
@@ -29,13 +30,22 @@ class TranscriptionAgent:
 
     def _load(self):
         if self._pipeline is None:
-            from transformers import pipeline
+            if self._load_failed:
+                raise RuntimeError("asr-unavailable: model failed to load earlier")
+            try:
+                from transformers import pipeline
 
-            self._pipeline = pipeline(
-                "automatic-speech-recognition",
-                model=self.model_name,
-                token=settings.hf_token or None,
-            )
+                # Cache-only by default, mirroring EmotionAgent: a cold machine
+                # must fail fast instead of downloading inside a request handler.
+                self._pipeline = pipeline(
+                    "automatic-speech-recognition",
+                    model=self.model_name,
+                    token=settings.hf_token or None,
+                    local_files_only=not self._allow_download(),
+                )
+            except Exception as exc:
+                self._load_failed = True
+                raise RuntimeError(f"asr-unavailable ({type(exc).__name__})") from exc
         return self._pipeline
 
     def transcribe(self, audio_path: str) -> TranscriptionResult:
@@ -48,7 +58,8 @@ class TranscriptionAgent:
         except Exception as exc:
             return TranscriptionResult(
                 text="",
-                model=self.model_name,
+                # Label the failure so callers can tell it apart from silence.
+                model=f"{self.model_name} (asr-unavailable: {type(exc).__name__})",
             )
 
     def transcribe_bytes(self, audio: bytes) -> TranscriptionResult:

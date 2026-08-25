@@ -26,8 +26,14 @@ def build_explainability(
     agreement: AgreementResult | None,
     correlation: CorrelationResult | None,
     audio_path: str | None = None,
+    text_emotion: EmotionResult | None = None,
 ) -> Explainability:
-    """Assemble the explainability artifact from agent outputs."""
+    """Assemble the explainability artifact from agent outputs.
+
+    ``text_emotion`` carries the transcript-only reading on the text pipeline
+    (where ``emotion`` holds that same text mood); passing it explicitly keeps
+    ``text_mood`` populated instead of null.
+    """
     prosody: dict = {}
     waveform = False
 
@@ -35,10 +41,18 @@ def build_explainability(
         waveform = True
         prosody = _extract_prosody(audio_path)
 
+    text_mood: Mood | None
+    if text_emotion is not None:
+        text_mood = text_emotion.mood
+    elif agreement is not None:
+        text_mood = agreement.text_mood
+    else:
+        text_mood = None
+
     return Explainability(
         transcript=transcription.text,
         audio_mood=emotion.mood,
-        text_mood=agreement.text_mood if agreement else None,
+        text_mood=text_mood,
         agreement_reason=agreement.reasoning if agreement else "",
         pace_reason=pace.reasoning,
         causal_reason=correlation.causal.reasoning if correlation and correlation.causal else "",
@@ -80,6 +94,11 @@ def _detect_failure_modes(
 
     if emotion.model == "keyword-fallback":
         modes.append("Emotion uses keyword fallback (model unavailable or not downloaded).")
+    if emotion.model == "audio-unavailable":
+        modes.append(
+            "Audio tone was NOT read (model unavailable); the mood comes from "
+            "the transcript or a neutral default."
+        )
     if emotion.confidence > 0 and emotion.calibrated_confidence is not None:
         if emotion.calibrated_confidence < 0.5:
             modes.append("Emotion confidence is low after calibration; treat mood label cautiously.")

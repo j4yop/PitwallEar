@@ -36,13 +36,36 @@ def test_granger_detects_clear_lead():
     assert res.direction == "mood leads pace"
 
 
-def test_transfer_entropy_returns_bounded_value():
+def test_transfer_entropy_detects_reverse_direction():
     rng = np.random.default_rng(1)
     cause = rng.integers(0, 4, 60)
+    # effect[t] = cause[t+2]: effect *leads* cause, so the bidirectional test
+    # must report a positive lag ("pace leads mood"), not a fabricated mood-lead.
     effect = np.roll(cause, -2)
     res = transfer_entropy(cause, effect, max_lag=3)
     assert res.statistic >= 0.0
-    assert res.best_lag in (-1, -2, -3)
+    assert res.best_lag == 2
+    assert res.direction == "pace leads mood"
+
+
+def test_granger_independent_series_not_significant():
+    rng = np.random.default_rng(7)
+    a = rng.normal(0, 1, 60)
+    b = rng.normal(0, 1, 60)
+    res = granger_causality(a, b, max_lag=3)
+    # Bidirectional selection always reports the smaller-p direction; for
+    # independent series it must be clearly insignificant.
+    assert res.p_value >= 0.05
+
+
+def test_granger_skips_meaningless_dof():
+    # n=8 with max_lag=3 gives dof < 5 for every lag: nothing may be reported.
+    rng = np.random.default_rng(9)
+    a = rng.normal(0, 1, 8)
+    b = rng.normal(0, 1, 8)
+    res = granger_causality(a, b, max_lag=3)
+    assert res.best_lag == 0
+    assert res.direction == "no directional lead"
 
 
 def test_lead_time_positive_for_clear_lead():

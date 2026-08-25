@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -36,7 +36,14 @@ app = FastAPI(title="PitwallEar", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Only the Vite dev/preview servers need cross-origin access. The wildcard
+    # previously let any webpage hit (and clear) the API.
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -153,8 +160,13 @@ def demo() -> AnalysisResponse:
 
 
 @app.post("/analyse-text", response_model=AnalysisResponse)
-async def analyse_text(req: TextRequest) -> AnalysisResponse:
-    """Run the co-driver pipeline from a transcript (no audio required)."""
+def analyse_text(req: TextRequest) -> AnalysisResponse:
+    """Run the co-driver pipeline from a transcript (no audio required).
+
+    Deliberately a sync handler: every downstream call (torch inference,
+    FastF1/OpenF1 fetches, the LLM request) is blocking, so FastAPI runs this
+    in its threadpool instead of freezing the event loop.
+    """
     transcription = TranscriptionResult(text=req.text, model="text-input")
     text_emotion = _emotion.classify_text(req.text)
     pace = _pace.analyse(req.driver, req.gp, req.year)
@@ -165,7 +177,8 @@ async def analyse_text(req: TextRequest) -> AnalysisResponse:
     )
 
     explainability = build_explainability(
-        transcription, text_emotion, pace, agreement, correlation
+        transcription, text_emotion, pace, agreement, correlation,
+        text_emotion=text_emotion,
     )
 
     # Persist paired samples for the multi-race significance runner.
@@ -186,15 +199,28 @@ async def analyse_text(req: TextRequest) -> AnalysisResponse:
     )
 
 
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
 @app.post("/analyse", response_model=AnalysisResponse)
-async def analyse(
+def analyse(
     audio: UploadFile = File(...),
     driver: str = Form("VER"),
     gp: str = Form("Melbourne"),
     year: int = Form(2025),
 ) -> AnalysisResponse:
-    """Run the full audio co-driver pipeline on an uploaded radio clip."""
-    raw = await audio.read()
+    """Run the full audio co-driver pipeline on an uploaded radio clip.
+
+    Sync handler for the same reason as /analyse-text. The upload is read via
+    the sync file handle with a hard size cap so a huge body cannot exhaust
+    memory.
+    """
+    raw = audio.file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(raw) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Audio upload exceeds {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+        )
 
     transcription = _transcription.transcribe_bytes(raw)
     audio_emotion = _emotion.classify_bytes(raw)
@@ -233,8 +259,13 @@ def aggregation() -> dict:
     return pooled_causal_analysis(rows)
 
 
-@app.get("/aggregation/clear", response_model=dict)
+@app.post("/aggregation/clear", response_model=dict)
 def aggregation_clear() -> dict:
+    """Wipe the persistent pooled-sample store.
+
+    Deliberately POST: a GET here could be triggered by prefetch/link-preview
+    requests and silently destroy the corpus.
+    """
     clear_samples()
     return {"status": "cleared"}
 

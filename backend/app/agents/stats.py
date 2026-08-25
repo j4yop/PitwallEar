@@ -21,6 +21,11 @@ from app.schemas import LapPoint, Mood, MoodPoint
 
 _MOOD_RANK: dict[Mood, float] = {"Calm": 1.0, "Neutral": 2.0, "Tired": 3.0, "Stressed": 4.0}
 
+# Minimum residual degrees of freedom for a Granger F-test to be reported at
+# all. Below this the F statistic is meaningless; races with few paired laps
+# fall through to transfer entropy or "no directional lead" instead.
+_MIN_GRANGER_DOF = 5
+
 
 @dataclass
 class CausalResult:
@@ -39,12 +44,18 @@ def mood_rank(mood: Mood) -> float:
     return _MOOD_RANK[mood]
 
 
-def pearson(xs: np.ndarray, ys: np.ndarray) -> tuple[float, float]:
-    """Pearson correlation with a two-sided p-value via scipy."""
+def pearson(xs: np.ndarray, ys: np.ndarray) -> tuple[float | None, float | None]:
+    """Pearson correlation with a two-sided p-value via scipy.
+
+    Returns ``(None, None)`` when r is undefined: too few points, or either
+    series has zero variance (e.g. every lap labelled with the same mood).
+    """
     from scipy.stats import pearsonr  # type: ignore
 
     if xs.size < 3 or ys.size < 3:
-        return 0.0, 1.0
+        return None, None
+    if float(np.std(xs)) == 0.0 or float(np.std(ys)) == 0.0:
+        return None, None
     r, p = pearsonr(xs, ys)
     return float(r), float(p)
 
@@ -76,18 +87,56 @@ def granger_causality(
     effect: np.ndarray,
     max_lag: int = 3,
 ) -> CausalResult:
-    """Test whether ``cause`` Granger-causes ``effect``.
+    """Test Granger causality in *both* directions and report the stronger one.
 
-    Fits two vector autoregressions at every lag in ``[1, max_lag]`` and returns
-    the lag with the strongest evidence (smallest p-value). A negative sign in
-    the returned ``best_lag`` means cause leads effect (mood leads pace).
+    Fits restricted/unrestricted autoregressions at every lag in ``[1, max_lag]``
+    for cause→effect and for effect→cause, then keeps the direction with the
+    smaller (Bonferroni-corrected) p-value. A negative ``best_lag`` means mood
+    leads pace; positive means pace leads mood. Lags whose residual degrees of
+    freedom fall below ``_MIN_GRANGER_DOF`` are skipped rather than reported.
     """
+    fwd_lag, fwd_stat, fwd_p, fwd_tests = _granger_one_direction(cause, effect, max_lag)
+    rev_lag, rev_stat, rev_p, rev_tests = _granger_one_direction(effect, cause, max_lag)
+
+    n_tests = fwd_tests + rev_tests
+    if fwd_p <= rev_p:
+        best_lag, best_stat = -fwd_lag, fwd_stat
+        best_p = min(1.0, fwd_p * n_tests)  # Bonferroni over all tested lags.
+    else:
+        best_lag, best_stat = rev_lag, rev_stat
+        best_p = min(1.0, rev_p * n_tests)
+
+    direction = (
+        "mood leads pace"
+        if best_lag < 0
+        else "pace leads mood"
+        if best_lag > 0
+        else "no directional lead"
+    )
+    return CausalResult(
+        method="granger",
+        statistic=round(best_stat, 4),
+        p_value=round(best_p, 6),
+        best_lag=best_lag,
+        direction=direction,
+        sample_size=min(cause.size, effect.size),
+        reasoning=_causal_reasoning("Granger causality", best_lag, best_p),
+    )
+
+
+def _granger_one_direction(
+    cause: np.ndarray,
+    effect: np.ndarray,
+    max_lag: int,
+) -> tuple[int, float, float, int]:
+    """Best (lag, F-stat, p, tests-run) for the hypothesis cause → effect."""
     from scipy.stats import f as f_dist  # type: ignore
 
     n = min(cause.size, effect.size)
     best_lag = 0
     best_stat = float("inf")
     best_p = 1.0
+    tests = 0
 
     for lag in range(1, max_lag + 1):
         # Pair cause[t] with effect[t + lag]: cause leads effect.
@@ -106,35 +155,21 @@ def granger_causality(
 
         k = lag  # number of added regressors
         dof = n - lag - (2 * lag + 1)
-        if dof <= 0 or rss_u <= 0:
+        if dof < _MIN_GRANGER_DOF or rss_u <= 0:
             continue
 
         f_stat = ((rss_r - rss_u) / k) / (rss_u / dof)
         if f_stat < 0:
             f_stat = 0.0
         p = float(f_dist.sf(f_stat, k, dof))
+        tests += 1
 
         if p < best_p:
             best_p = p
             best_stat = float(f_stat)
-            best_lag = -lag
+            best_lag = lag
 
-    direction = (
-        "mood leads pace"
-        if best_lag < 0
-        else "pace leads mood"
-        if best_lag > 0
-        else "no directional lead"
-    )
-    return CausalResult(
-        method="granger",
-        statistic=round(best_stat, 4),
-        p_value=round(best_p, 6),
-        best_lag=best_lag,
-        direction=direction,
-        sample_size=n,
-        reasoning=_causal_reasoning("Granger causality", best_lag, best_p),
-    )
+    return best_lag, best_stat, best_p, tests
 
 
 def transfer_entropy(
@@ -143,32 +178,35 @@ def transfer_entropy(
     max_lag: int = 3,
     bins: int = 4,
 ) -> CausalResult:
-    """Estimate transfer entropy from ``cause`` to ``effect`` with a simple
-    histogram estimator. Returns the lag with the largest information transfer.
+    """Estimate transfer entropy with a simple histogram estimator, testing
+    both directions and reporting the stronger one.
+
+    Returns the lag with the largest information transfer across
+    cause→effect (negative lag) and effect→cause (positive lag).
     """
     from scipy.stats import chi2  # type: ignore
 
     n = min(cause.size, effect.size)
     best_lag = 0
     best_te = -1.0
-    best_p = 1.0
 
-    for lag in range(1, max_lag + 1):
-        c = cause[: n - lag]
-        e = effect[lag:n]
-        e_past = effect[: n - lag]
-        if c.size < 8:
-            continue
+    for direction_sign, src, dst in ((-1, cause, effect), (1, effect, cause)):
+        for lag in range(1, max_lag + 1):
+            c = src[: n - lag]
+            e = dst[lag:n]
+            e_past = dst[: n - lag]
+            if c.size < 8:
+                continue
 
-        # Discretise with quantile bins so the estimator is scale-free.
-        c_q = _quantile_bin(c, bins)
-        e_q = _quantile_bin(e, bins)
-        ep_q = _quantile_bin(e_past, bins)
+            # Discretise with quantile bins so the estimator is scale-free.
+            c_q = _quantile_bin(c, bins)
+            e_q = _quantile_bin(e, bins)
+            ep_q = _quantile_bin(e_past, bins)
 
-        te = _te_hist(ep_q, c_q, e_q)
-        if te > best_te:
-            best_te = te
-            best_lag = -lag
+            te = _te_hist(ep_q, c_q, e_q)
+            if te > best_te:
+                best_te = te
+                best_lag = direction_sign * lag
 
     # A rough significance value: 2*TE follows chi2((bins-1)^2 * bins) under a
     # Gaussian surrogate in many histogram TE estimators. This is an
@@ -247,7 +285,11 @@ def _causal_reasoning(method: str, lag: int, p: float) -> str:
         lead = f"pace changes before mood by {lag} lap(s) — mood is a response"
     else:
         lead = "no directional lead found"
-    return f"{method}: best lead-lag {lag}, p={p:.4f} ({lead})."
+    return (
+        f"{method}: best lead-lag {lag}, p={p:.4f} ({lead}). "
+        "Both directions were tested (smaller corrected p wins); series are "
+        "analysed as levels, so near-integrated inputs can inflate false positives."
+    )
 
 
 def lead_time(cause: np.ndarray, effect: np.ndarray, max_lag: int = 3) -> int:

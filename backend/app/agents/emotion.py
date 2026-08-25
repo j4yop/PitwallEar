@@ -21,6 +21,8 @@ import math
 import os
 import tempfile
 
+import numpy as np
+
 from app.config import settings
 from app.schemas import EmotionResult, Mood
 
@@ -70,10 +72,12 @@ _EMOTION_TEMPERATURE = 1.5
 
 
 def calibrate_confidence(raw: float) -> float:
-    """Approximate calibrated confidence via temperature-scaled softmax.
+    """Approximate calibrated confidence via temperature-scaled logit.
 
-    For a two-class softmax with a top probability ``raw``, applying temperature
-    ``T`` maps it to ``exp(logit(raw)/T) / (1 + exp(logit(raw)/T))``.
+    Correct for a two-class read whose top probability is ``raw``:
+    ``sigmoid(logit(raw)/T)`` softens overconfidence toward 0.5. The same
+    formula would *raise* inputs below 0.5, which is backwards, so those are
+    clamped to at most their raw value.
     """
     if raw <= 0.0:
         return 0.0
@@ -81,7 +85,31 @@ def calibrate_confidence(raw: float) -> float:
         return 1.0
     logit = math.log(raw / (1.0 - raw))
     scaled = math.exp(logit / _EMOTION_TEMPERATURE)
-    return round(scaled / (1.0 + scaled), 3)
+    calibrated = scaled / (1.0 + scaled)
+    if raw < 0.5:
+        return round(min(calibrated, raw), 3)
+    return round(calibrated, 3)
+
+
+def calibrate_from_scores(scores: dict[str, float], top_label: str) -> float:
+    """Temperature-scale a full label distribution and return the top score.
+
+    Recovers approximate logits as ``log(p)`` and applies softmax at
+    temperature T — the correct multi-class generalisation of the binary
+    logit formula, which previously *raised* confidence for inputs below 0.5.
+    """
+    if not scores:
+        return 0.0
+    probs = np.array(
+        [max(float(v), 1e-9) for v in scores.values()], dtype=float
+    )
+    logits = np.log(probs)
+    scaled = logits / _EMOTION_TEMPERATURE
+    scaled -= scaled.max()
+    soft = np.exp(scaled) / np.exp(scaled).sum()
+    labels = list(scores.keys())
+    idx = labels.index(top_label) if top_label in labels else int(np.argmax(soft))
+    return round(float(soft[idx]), 3)
 
 
 class EmotionAgent:
@@ -145,7 +173,8 @@ class EmotionAgent:
             raw_label = top.get("label", "neutral").lower()
             confidence = float(top.get("score", 0.0))
             mood = self._audio_to_mood(raw_label)
-            calibrated = calibrate_confidence(confidence)
+            scores = {str(p.get("label", "")): float(p.get("score", 0.0)) for p in predictions}
+            calibrated = calibrate_from_scores(scores, str(top.get("label", "")))
             reasoning = self._audio_reasoning(raw_label, calibrated)
             return EmotionResult(
                 mood=mood,
@@ -155,10 +184,12 @@ class EmotionAgent:
                 reasoning=reasoning,
             )
         except Exception as exc:
+            # Label the fallback so explainability can report that audio tone
+            # was NOT read by a model (a real-model result never uses this id).
             return EmotionResult(
                 mood="Neutral",
                 confidence=0.0,
-                model=self.audio_model,
+                model="audio-unavailable",
                 reasoning=f"Audio emotion unavailable ({type(exc).__name__}).",
             )
 
@@ -195,7 +226,8 @@ class EmotionAgent:
             raw_label = top.get("label", "").lower()
             confidence = float(top.get("score", 0.0))
             mood = self._text_to_mood(raw_label)
-            calibrated = calibrate_confidence(confidence)
+            scores = {str(p.get("label", "")): float(p.get("score", 0.0)) for p in predictions}
+            calibrated = calibrate_from_scores(scores, str(top.get("label", "")))
             reasoning = self._text_reasoning(raw_label, calibrated)
             return EmotionResult(
                 mood=mood,

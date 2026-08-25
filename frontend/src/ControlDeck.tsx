@@ -91,7 +91,14 @@ export const ControlDeck = memo(function ControlDeck({
           <input
             type="number"
             value={year}
-            onChange={(e) => onYearChange(Number(e.target.value))}
+            onChange={(e) => {
+              // Ignore empty/partial/out-of-range input instead of sending 0 or NaN.
+              const n = Number(e.target.value);
+              if (Number.isInteger(n) && n >= 2018 && n <= 2100) onYearChange(n);
+            }}
+            min={2018}
+            max={2100}
+            step={1}
             placeholder="2025"
           />
         </div>

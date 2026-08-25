@@ -123,7 +123,11 @@ class Orchestrator:
     def _call_openai(prompt: str) -> str:
         import openai  # type: ignore
 
-        client = openai.OpenAI(api_key=settings.openai_api_key)
+        client = openai.OpenAI(
+            api_key=settings.openai_api_key,
+            timeout=15.0,
+            max_retries=1,
+        )
         response = client.chat.completions.create(
             model=settings.llm_model,
             messages=[{"role": "user", "content": prompt}],
@@ -131,16 +135,27 @@ class Orchestrator:
         )
         return response.choices[0].message.content.strip()
 
+    _LLM_TIMEOUT_S = 15
+
     def _call_huggingface(self, prompt: str) -> str:
         import requests
 
         headers = {"Authorization": f"Bearer {settings.hf_token}"}
-        url = f"https://api-inference.huggingface.co/models/{settings.llm_model}"
-        payload = {"inputs": prompt, "parameters": {"max_new_tokens": 120}}
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        # Chat-completion models (e.g. Mistral-7B-Instruct) are served through
+        # the router; the legacy api-inference endpoint 404s for them.
+        url = "https://router.huggingface.co/v1/chat/completions"
+        payload = {
+            "model": settings.llm_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 120,
+            "temperature": 0.2,
+        }
+        response = requests.post(
+            url, headers=headers, json=payload, timeout=self._LLM_TIMEOUT_S
+        )
         response.raise_for_status()
         data = response.json()
-        return str(data[0]["generated_text"]).replace(prompt, "").strip()
+        return str(data["choices"][0]["message"]["content"]).strip()
 
     @staticmethod
     def _fallback(
@@ -203,6 +218,8 @@ class Orchestrator:
             return "Strong early-warning signal: check on driver and consider a pit or pace reset."
         if stress_negative and pace_slowing and correlation_positive:
             return "Strong signal: check on driver and consider a pit or pace reset."
+        if stress_negative and pace_slowing:
+            return "Strong signal: driver sounds stressed while pace drops — check on driver."
         if agreement_conflict:
             return "Tone/words disagree: verify what the driver actually means."
         if stress_negative:
