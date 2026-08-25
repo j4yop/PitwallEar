@@ -2,7 +2,7 @@
 FROM node:22-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install --include=dev
+RUN npm ci --include=dev
 COPY frontend/ ./
 RUN npm run build
 
@@ -17,7 +17,10 @@ COPY backend/ ./backend/
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 WORKDIR /app/backend
-RUN pip install --no-cache-dir -e ".[pace,audio]"
+# CPU torch wheels: the default index resolves CUDA-bundled wheels (~2-3 GB
+# extra) that a slim serving image never needs.
+RUN pip install --no-cache-dir -e ".[pace,audio]" \
+    --extra-index-url https://download.pytorch.org/whl/cpu
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 7860

@@ -36,7 +36,14 @@ app = FastAPI(title="PitwallEar", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Only the Vite dev/preview servers need cross-origin access. The wildcard
+    # previously let any webpage hit (and clear) the API.
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -170,7 +177,8 @@ def analyse_text(req: TextRequest) -> AnalysisResponse:
     )
 
     explainability = build_explainability(
-        transcription, text_emotion, pace, agreement, correlation
+        transcription, text_emotion, pace, agreement, correlation,
+        text_emotion=text_emotion,
     )
 
     # Persist paired samples for the multi-race significance runner.
@@ -251,8 +259,13 @@ def aggregation() -> dict:
     return pooled_causal_analysis(rows)
 
 
-@app.get("/aggregation/clear", response_model=dict)
+@app.post("/aggregation/clear", response_model=dict)
 def aggregation_clear() -> dict:
+    """Wipe the persistent pooled-sample store.
+
+    Deliberately POST: a GET here could be triggered by prefetch/link-preview
+    requests and silently destroy the corpus.
+    """
     clear_samples()
     return {"status": "cleared"}
 

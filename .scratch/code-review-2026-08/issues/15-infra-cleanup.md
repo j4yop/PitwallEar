@@ -11,3 +11,8 @@ Status: resolved
 
 2026-08-25: pytest.ini and .gitignore fixed. Dockerfile torch pin left as a
 follow-up (needs a build to verify image size).
+
+## Comments
+
+2026-08-25: Fully resolved - Dockerfile now uses npm ci and installs torch
+from the CPU wheel index (avoids ~2-3GB CUDA wheels in the slim image).
