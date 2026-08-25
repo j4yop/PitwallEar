@@ -140,7 +140,9 @@ def pooled_causal_analysis(rows: list[AggregationRow]) -> dict:
             continue
         causal = stats.granger_causality(mood, pace)
         n_races_with_result += 1
-        if causal.best_lag < 0:
+        # Only significant mood-leads results count toward the headline
+        # fraction; insignificant lags are not evidence of early warning.
+        if causal.best_lag < 0 and causal.p_value < 0.05:
             n_leads += 1
             lead_laps.append(abs(causal.best_lag))
 

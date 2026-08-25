@@ -16,3 +16,14 @@ Deferred smaller items:
 - Unvalidated driver/gp/year flow into upstream URLs and permanent DB rows.
 
 ## Comments
+
+## Comments
+
+2026-08-25 (PR 1): NaT lap-start guard, transcription failure sentinel.
+2026-08-25 (PR 2): OpenAI client timeout=15/max_retries=1; HF calls moved to
+router.huggingface.co chat completions with timeout=15; audio-emotion
+fallback labelled "audio-unavailable" and flagged by explainability;
+multi-class calibration via calibrate_from_scores (log-prob temperature
+scaling) replacing the binary-logit formula; upstream query params quoted,
+year cast to int. Still open: SSE streamed timeline laps always 0;
+arbitrary driver/gp/year rows in the aggregation DB (needs an allowlist).

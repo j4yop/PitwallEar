@@ -1,6 +1,6 @@
 # API hardening: destructive GET, CORS wildcard, explainability mislabel
 
-Status: ready-for-agent
+Status: resolved
 
 - `app/main.py:236`: GET /aggregation/clear wipes the pooled store; combined
   with CORS `allow_origins=["*"]` any webpage can erase it. Make it POST/DELETE
@@ -12,3 +12,10 @@ Status: ready-for-agent
   schema calls it Pearson r (`correlation.py:57-68`) — return None instead.
 
 ## Comments
+
+## Comments
+
+2026-08-25: Resolved - clear route is POST-only (GET returns 404), CORS
+restricted to Vite dev/preview origins (verified foreign origin gets no ACAO),
+explainability takes text_emotion explicitly so text_mood is populated,
+legacy path returns correlation=None instead of a rescaled delta.

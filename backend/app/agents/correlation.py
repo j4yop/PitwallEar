@@ -36,8 +36,9 @@ def correlate_stress_to_pace(
     """Legacy single-mood approximation.
 
     This is NOT the production method; it exists only so callers without a
-    per-lap timeline still get a value. It propagates one mood across the lap
-    window and compares the first half against the second half.
+    per-lap timeline still get context. It compares the second half of the race
+    against the first and reports the pace delta in the reasoning — the
+    ``correlation`` field stays None because no Pearson r was computed.
     """
     clean = [p for p in laps if p.lap_time_s is not None]
     if len(clean) < 4:
@@ -54,28 +55,15 @@ def correlate_stress_to_pace(
     recent_mean = statistics.mean(p.lap_time_s for p in recent)
     delta = recent_mean - baseline_mean
 
-    stressed_moods = {"Stressed", "Tired"}
-    if mood in stressed_moods:
-        correlation = max(-1.0, min(1.0, delta / 0.5))
-        sign = "slower" if delta > 0.2 else ("faster" if delta < -0.2 else "stable")
-        reasoning = (
-            f"Negative mood ({mood}) and recent pace is {sign} "
-            f"({delta:+.2f}s vs baseline). "
-            f"Correlation {correlation:+.2f} on {len(clean)} laps. "
-            f"(single-mood approximation, not a real per-lap timeline)"
-        )
-    else:
-        correlation = max(-1.0, min(1.0, -delta / 0.5))
-        sign = "slower" if delta > 0.2 else ("faster" if delta < -0.2 else "stable")
-        reasoning = (
-            f"Non-negative mood ({mood}) and recent pace is {sign} "
-            f"({delta:+.2f}s vs baseline). "
-            f"Correlation {correlation:+.2f} on {len(clean)} laps. "
-            f"(single-mood approximation, not a real per-lap timeline)"
-        )
+    sign = "slower" if delta > 0.2 else ("faster" if delta < -0.2 else "stable")
+    reasoning = (
+        f"Mood {mood}; recent half of the race is {sign} "
+        f"({delta:+.2f}s vs earlier laps, {len(clean)} laps total). "
+        f"No Pearson r: this is a single-mood approximation, not a per-lap timeline."
+    )
 
     return CorrelationResult(
-        correlation=round(correlation, 3),
+        correlation=None,
         best_lag=0,
         p_value=None,
         sample_size=len(clean),
@@ -207,11 +195,11 @@ def _risk_lead_time(
 ) -> tuple[int | None, float | None]:
     """Convert a causal result into a lead-time headline with a confidence.
 
-    Lead time is only reported when mood is found to *lead* pace. The confidence
-    is 1 - p from the causal test, floored at 0.5 so a weak result is not
-    presented as certainty.
+    Lead time is only reported when mood is found to *lead* pace AND the causal
+    test is significant at p < 0.05 — an insignificant result is never dressed
+    up as an early-warning signal.
     """
-    if causal.best_lag >= 0:
+    if causal.best_lag >= 0 or causal.p_value >= 0.05:
         return None, None
     lead = abs(causal.best_lag)
     conf = round(max(0.5, 1.0 - causal.p_value), 3)
