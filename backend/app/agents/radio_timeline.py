@@ -23,6 +23,8 @@ import tempfile
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
+
 from app.agents.emotion import EmotionAgent
 from app.agents.transcription import TranscriptionAgent
 from app.schemas import MoodPoint
@@ -59,7 +61,10 @@ class RadioTimelineAgent:
             clips = self._fetch_radio_clips(driver, gp, year)
             timeline = self._label_clips(clips, lap_starts)
         except Exception:
-            timeline = []
+            # Transient upstream failure: return an empty timeline but do NOT
+            # cache it, so the next request retries instead of being poisoned
+            # until restart.
+            return []
 
         self._cache[key] = timeline
         return timeline
@@ -100,10 +105,14 @@ class RadioTimelineAgent:
         for _, row in laps.iterrows():
             lap = int(row.get("LapNumber"))
             ts = row.get("LapStartTime")
-            if ts is not None and hasattr(ts, "total_seconds"):
-                # LapStartTime is a Timedelta from session start.
-                dt = session_start + ts
-                starts.append((lap, dt))
+            if ts is None or not hasattr(ts, "total_seconds"):
+                continue
+            if pd.isna(ts):
+                # NaT lap starts would misalign every clip to the final lap.
+                continue
+            # LapStartTime is a Timedelta from session start.
+            dt = session_start + ts
+            starts.append((lap, dt))
         return sorted(starts, key=lambda x: x[0])
 
     @staticmethod
@@ -134,13 +143,17 @@ class RadioTimelineAgent:
             return json.loads(resp.read().decode())
 
     @staticmethod
-    def _driver_number(driver: str) -> int:
-        """Map a 3-letter code (VER) to a driver number (1)."""
+    def _driver_number(driver: str) -> int | None:
+        """Map a 3-letter code (VER) to a driver number (1).
+
+        Returns None for unmapped codes: guessing a number would silently
+        analyse a different driver's radio.
+        """
         static = {"VER": 1, "NOR": 4, "LEC": 16, "HAM": 44, "RUS": 63,
                   "PIA": 81, "SAI": 55, "ALO": 14, "GAS": 10, "OCO": 31,
                   "TSU": 22, "ALB": 23, "LAW": 30, "STR": 18, "MAG": 20,
                   "BOT": 77, "HUL": 27, "ZHO": 24, "COL": 6, "DOO": 2}
-        return static.get(driver.upper(), 1)
+        return static.get(driver.upper())
 
     def _fetch_radio_clips(self, driver: str, gp: str, year: int) -> list[dict]:
         """Return ``(timestamp, recording_url)`` dicts for a driver's radio."""
@@ -152,6 +165,9 @@ class RadioTimelineAgent:
 
         session_key = sessions[0]["session_key"]
         driver_number = self._driver_number(driver)
+        if driver_number is None:
+            # Unknown driver code — refuse to fetch another driver's radio.
+            return []
         clips = self._get_json(
             f"/team_radio?session_key={session_key}&driver_number={driver_number}"
         )

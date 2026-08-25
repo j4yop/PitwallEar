@@ -27,15 +27,26 @@ RACES = [
 ]
 
 
-def run_race(driver: str, gp: str, year: int) -> dict:
-    pace_agent = PaceAgent()
-    timeline_agent = RadioTimelineAgent()
+def run_race(
+    driver: str,
+    gp: str,
+    year: int,
+    pace_agent: PaceAgent | None = None,
+    timeline_agent: RadioTimelineAgent | None = None,
+) -> tuple[dict, list]:
+    """Analyse one race and return ``(summary, rows)``.
+
+    The rows are returned so the caller can persist them directly — the race is
+    fetched and inferred exactly once.
+    """
+    pace_agent = pace_agent or PaceAgent()
+    timeline_agent = timeline_agent or RadioTimelineAgent()
 
     pace = pace_agent.analyse(driver, gp, year)
     timeline = timeline_agent.build_timeline(driver, gp, year)
     rows = build_rows_from_analysis(driver, gp, year, pace.laps, timeline)
 
-    return {
+    summary = {
         "driver": driver,
         "gp": gp,
         "year": year,
@@ -43,6 +54,7 @@ def run_race(driver: str, gp: str, year: int) -> dict:
         "radio_labelled_laps": len(timeline),
         "paired_samples": len(rows),
     }
+    return summary, rows
 
 
 def main() -> None:
@@ -51,27 +63,26 @@ def main() -> None:
     parser.add_argument("--sleep", type=float, default=1.0)
     args = parser.parse_args()
 
-    summary = []
+    # Share one set of agents across races so models load exactly once.
+    pace_agent = PaceAgent()
+    timeline_agent = RadioTimelineAgent()
+
+    summary: list[dict] = []
+    rows: list = []
     for driver, gp, country, year in RACES[: args.races]:
         print(f"Processing {gp} {year} ({driver}) ...", flush=True)
         try:
-            result = run_race(driver, gp, year)
+            result, race_rows = run_race(
+                driver, gp, year, pace_agent=pace_agent, timeline_agent=timeline_agent
+            )
             print(f"  {result}", flush=True)
             summary.append(result)
+            rows.extend(race_rows)
         except Exception as exc:
             print(f"  FAILED: {type(exc).__name__}: {exc}", flush=True)
         time.sleep(args.sleep)
 
     # Persist whatever we managed to fetch.
-    rows: list = []
-    for driver, gp, country, year in RACES[: args.races]:
-        try:
-            pace = PaceAgent().analyse(driver, gp, year)
-            timeline = RadioTimelineAgent().build_timeline(driver, gp, year)
-            rows.extend(build_rows_from_analysis(driver, gp, year, pace.laps, timeline))
-        except Exception:
-            continue
-
     add_samples(rows)
 
     from app.agents.aggregation import all_samples

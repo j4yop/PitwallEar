@@ -27,7 +27,9 @@ class PaceAgent:
         try:
             laps = self._fetch_laps(driver, gp, year)
         except Exception:
-            laps = []
+            # Transient failure: return empty but do NOT cache, so the next
+            # request retries instead of being poisoned until restart.
+            return []
         self._cache[key] = laps
         return laps
 

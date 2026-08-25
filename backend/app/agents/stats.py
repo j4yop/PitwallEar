@@ -39,12 +39,18 @@ def mood_rank(mood: Mood) -> float:
     return _MOOD_RANK[mood]
 
 
-def pearson(xs: np.ndarray, ys: np.ndarray) -> tuple[float, float]:
-    """Pearson correlation with a two-sided p-value via scipy."""
+def pearson(xs: np.ndarray, ys: np.ndarray) -> tuple[float | None, float | None]:
+    """Pearson correlation with a two-sided p-value via scipy.
+
+    Returns ``(None, None)`` when r is undefined: too few points, or either
+    series has zero variance (e.g. every lap labelled with the same mood).
+    """
     from scipy.stats import pearsonr  # type: ignore
 
     if xs.size < 3 or ys.size < 3:
-        return 0.0, 1.0
+        return None, None
+    if float(np.std(xs)) == 0.0 or float(np.std(ys)) == 0.0:
+        return None, None
     r, p = pearsonr(xs, ys)
     return float(r), float(p)
 

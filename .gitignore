@@ -7,3 +7,6 @@ dist/
 backend/data/
 *.tsbuildinfo
 .pytest_cache/
+*.egg-info/
+.DS_Store
+backend/.cache/

@@ -156,6 +156,7 @@ def pooled_causal_analysis(rows: list[AggregationRow]) -> dict:
 
     fraction = n_leads / n_races_with_result
     median_lead = float(np.median(lead_laps)) if lead_laps else None
+    median_txt = f"{median_lead:.1f}" if median_lead is not None else "n/a"
 
     return {
         "sample_size": len(rows),
@@ -165,7 +166,7 @@ def pooled_causal_analysis(rows: list[AggregationRow]) -> dict:
         "median_lead_laps": round(median_lead, 1) if median_lead is not None else None,
         "reasoning": (
             f"Mood leads pace in {n_leads}/{n_races_with_result} races "
-            f"({fraction:.0%}), median lead {median_lead:.1f} laps "
+            f"({fraction:.0%}), median lead {median_txt} laps "
             f"across {len(rows)} paired samples."
         ),
     }

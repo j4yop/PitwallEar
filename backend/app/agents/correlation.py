@@ -144,6 +144,22 @@ def correlate_timeline_to_pace(
     stressed = [p for p in clean if mood_by_lap.get(p.lap) in {"Stressed", "Tired"}]
     non_stressed = [p for p in clean if mood_by_lap.get(p.lap) in {"Calm", "Neutral"}]
 
+    if correlation is None or p_value is None:
+        # Undefined r: degenerate series (constant mood is the common case).
+        # Report honestly instead of emitting a NaN that breaks JSON clients.
+        return CorrelationResult(
+            correlation=None,
+            sample_size=len(paired),
+            mood_timeline=timeline,
+            stress_laps=stressed,
+            non_stress_laps=non_stressed,
+            reasoning=(
+                f"No Pearson correlation defined over {len(paired)} radio-labelled "
+                f"laps: at least one series has zero variance (e.g. every labelled "
+                f"lap shows the same mood)."
+            ),
+        )
+
     causal_raw = _causal_lead(mood_series, pace_series)
     causal = CausalResult(
         method=causal_raw.method,

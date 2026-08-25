@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -153,8 +153,13 @@ def demo() -> AnalysisResponse:
 
 
 @app.post("/analyse-text", response_model=AnalysisResponse)
-async def analyse_text(req: TextRequest) -> AnalysisResponse:
-    """Run the co-driver pipeline from a transcript (no audio required)."""
+def analyse_text(req: TextRequest) -> AnalysisResponse:
+    """Run the co-driver pipeline from a transcript (no audio required).
+
+    Deliberately a sync handler: every downstream call (torch inference,
+    FastF1/OpenF1 fetches, the LLM request) is blocking, so FastAPI runs this
+    in its threadpool instead of freezing the event loop.
+    """
     transcription = TranscriptionResult(text=req.text, model="text-input")
     text_emotion = _emotion.classify_text(req.text)
     pace = _pace.analyse(req.driver, req.gp, req.year)
@@ -186,15 +191,28 @@ async def analyse_text(req: TextRequest) -> AnalysisResponse:
     )
 
 
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
 @app.post("/analyse", response_model=AnalysisResponse)
-async def analyse(
+def analyse(
     audio: UploadFile = File(...),
     driver: str = Form("VER"),
     gp: str = Form("Melbourne"),
     year: int = Form(2025),
 ) -> AnalysisResponse:
-    """Run the full audio co-driver pipeline on an uploaded radio clip."""
-    raw = await audio.read()
+    """Run the full audio co-driver pipeline on an uploaded radio clip.
+
+    Sync handler for the same reason as /analyse-text. The upload is read via
+    the sync file handle with a hard size cap so a huge body cannot exhaust
+    memory.
+    """
+    raw = audio.file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(raw) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Audio upload exceeds {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+        )
 
     transcription = _transcription.transcribe_bytes(raw)
     audio_emotion = _emotion.classify_bytes(raw)
