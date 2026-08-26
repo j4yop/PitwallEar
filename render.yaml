@@ -13,4 +13,7 @@ services:
       # container into permanent 503s. Models load lazily per request instead.
       - key: PITWALLEAR_WARMUP
         value: "none"
+      # Int8-quantize Linear layers at load time so full models fit in RAM.
+      - key: PITWALLEAR_QUANTIZE
+        value: "1"
     autoDeploy: true
