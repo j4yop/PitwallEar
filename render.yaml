@@ -5,15 +5,12 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
-      - key: HF_TOKEN
-        sync: false
+      # Free tier = 512 MB RAM: real transformer weights cannot fit. Keep
+      # models OFF in production - agents degrade to clearly-labelled keyword
+      # fallbacks (fast, stable), while pace/timeline/correlation stay fully
+      # live. Full-strength ML runs locally where RAM allows.
       - key: PITWALLEAR_ALLOW_DOWNLOAD
-        value: "1"
-      # Free tier has 512 MB RAM: eager model loading OOM-crash-loops the
-      # container into permanent 503s. Models load lazily per request instead.
+        value: "0"
       - key: PITWALLEAR_WARMUP
         value: "none"
-      # Int8-quantize Linear layers at load time so full models fit in RAM.
-      - key: PITWALLEAR_QUANTIZE
-        value: "1"
     autoDeploy: true
