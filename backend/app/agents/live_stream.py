@@ -47,6 +47,8 @@ class LiveStreamEngine:
         self._transcription = transcription_agent or TranscriptionAgent()
         self._seen: set[str] = set()
         self._timeline: list[MoodPoint] = []
+        self._lap_starts: list[tuple[int, datetime]] | None = None
+        self._lap_key: tuple[str, str, int] | None = None
 
     @property
     def timeline(self) -> list[MoodPoint]:
@@ -62,9 +64,16 @@ class LiveStreamEngine:
         clips = await asyncio.to_thread(self._fetch_radio_clips, driver, gp, year)
         new = [c for c in clips if c["recording_url"] not in self._seen]
 
+        # Lap starts are fetched once per session, not per clip.
+        if self._lap_key != (driver, gp, year):
+            self._lap_starts = await asyncio.to_thread(self._fetch_lap_starts, driver, gp, year)
+            self._lap_key = (driver, gp, year)
+
         for clip in new:
             self._seen.add(clip["recording_url"])
-            point = await asyncio.to_thread(self._process_clip, clip)
+            point = await asyncio.to_thread(
+                self._process_clip, clip, driver, gp, year
+            )
             if point is not None:
                 self._timeline.append(point)
                 self._timeline.sort(key=lambda p: p.lap)
@@ -136,8 +145,31 @@ class LiveStreamEngine:
                 continue
         return recent > 0
 
-    def _process_clip(self, clip: dict) -> MoodPoint | None:
-        """Transcribe + classify a single clip, mapping to a lap if possible."""
+    @staticmethod
+    def _fetch_lap_starts(driver: str, gp: str, year: int) -> list[tuple[int, datetime]]:
+        """Fetch FastF1 lap-start times once per session (empty on failure)."""
+        try:
+            return RadioTimelineAgent._fetch_lap_starts(driver, gp, year)
+        except Exception:
+            return []
+
+    def _lap_for_clip(self, clip: dict) -> int | None:
+        """Map a clip's timestamp to the lap it was sent on.
+
+        Uses real FastF1 lap starts when available; clips that fall outside
+        every lap window map to None and are dropped by the caller.
+        """
+        if not self._lap_starts:
+            return None
+        ts = RadioTimelineAgent._parse_ts(clip.get("date", ""))
+        if ts is None:
+            return None
+        return RadioTimelineAgent._lap_for_timestamp(ts, self._lap_starts)
+
+    def _process_clip(
+        self, clip: dict, driver: str = "", gp: str = "", year: int = 0
+    ) -> MoodPoint | None:
+        """Transcribe + classify a single clip, aligning it to a real lap."""
         url = clip["recording_url"]
         try:
             req = urllib.request.Request(url, headers=_HEADERS)
@@ -155,27 +187,17 @@ class LiveStreamEngine:
                 return None
             emotion = self._emotion.classify_text(text)
 
-            # Lap alignment is done lazily: without FastF1 lap starts in the
-            # stream, use a best-effort lap of 0 and let the caller align.
-            lap = self._lap_for_stream(clip)
+            lap = self._lap_for_clip(clip)
             return MoodPoint(
-                lap=lap,
+                lap=lap if lap is not None else 0,
                 mood=emotion.mood,
                 confidence=emotion.confidence,
                 calibrated_confidence=emotion.calibrated_confidence,
-                source="openf1-live",
+                # Unaligned points are labelled so the UI never presents a
+                # guessed lap as a real one.
+                source="openf1-live" if lap is not None else "openf1-live-unaligned",
                 transcript=text,
                 clip_url=url,
             )
         except Exception:
             return None
-
-    @staticmethod
-    def _lap_for_stream(clip: dict) -> int:
-        """Nominal lap for the stream before exact alignment is available.
-
-        This is a placeholder used only by the streaming path until a FastF1
-        lap-start lookup is wired in; the batch path already does exact
-        alignment. It is labelled as approximate in the MoodPoint source.
-        """
-        return 0

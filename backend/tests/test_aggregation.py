@@ -83,3 +83,31 @@ def test_build_rows_from_analysis_pairs_labels_and_laps():
     rows = build_rows_from_analysis("VER", "Monaco", 2024, laps, timeline)
     assert len(rows) == 1
     assert rows[0].lap == 1 and rows[0].gp == "Monaco"
+
+
+def test_add_samples_rejects_unknown_driver():
+    from app.agents.aggregation import _row_is_valid
+
+    assert not _row_is_valid(_row(driver="XX9"))
+    assert _row_is_valid(_row(driver="VER"))
+
+
+def test_add_samples_rejects_garbage_year_and_lap():
+    from app.agents.aggregation import _row_is_valid
+
+    bad = AggregationRow("VER", "Spa", 1999, 1, "Calm", 1.0, 0.1)
+    bad_lap = AggregationRow("VER", "Spa", 2024, -3, "Calm", 1.0, 0.1)
+    bad_mood = AggregationRow("VER", "Spa", 2024, 1, "Angry", 9.9, 0.1)
+    assert not _row_is_valid(bad)
+    assert not _row_is_valid(bad_lap)
+    assert not _row_is_valid(bad_mood)
+
+
+def test_add_samples_filters_before_persist(tmp_path, monkeypatch):
+    monkeypatch.setattr(aggregation, "_db_path", lambda: tmp_path / "f.db")
+    good = _row(lap=1)
+    bad = AggregationRow("HACK", "Evil GP; DROP", 2024, 2, "Stressed", 4.0, 0.5)
+    added = add_samples([good, bad])
+    assert added == 1
+    rows = all_samples()
+    assert len(rows) == 1 and rows[0].driver == "VER"

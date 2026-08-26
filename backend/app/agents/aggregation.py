@@ -56,9 +56,40 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+_VALID_MOODS = {"Calm", "Neutral", "Tired", "Stressed"}
+
+
+def _row_is_valid(row: AggregationRow) -> bool:
+    """Gate persisted samples so arbitrary client input can't poison the pool.
+
+    The pooled store is permanent (PK-replace, never expires), so rows are
+    only accepted for known driver codes and sane race/lap values. Unknown
+    drivers would silently aggregate someone else's radio under a wrong name.
+    """
+    from app.agents.radio_timeline import RadioTimelineAgent
+
+    if not isinstance(row.driver, str) or RadioTimelineAgent._driver_number(row.driver) is None:
+        return False
+    if not isinstance(row.year, int) or isinstance(row.year, bool) or not 2018 <= row.year <= 2100:
+        return False
+    if not isinstance(row.lap, int) or isinstance(row.lap, bool) or row.lap < 1:
+        return False
+    if row.mood not in _VALID_MOODS:
+        return False
+    gp_text = str(row.gp).strip()
+    if not 1 <= len(gp_text) <= 80 or any(ch in gp_text for ch in ";%$\x00"):
+        return False
+    return True
+
+
 def add_samples(rows: list[AggregationRow]) -> int:
-    """Persist paired samples, replacing any existing row for the same lap."""
-    if not rows:
+    """Persist paired samples, replacing any existing row for the same lap.
+
+    Rows failing the allowlist are dropped silently-but-counted; the store is
+    a statistics corpus, not an event log — bad rows have no diagnostic value.
+    """
+    accepted = [r for r in rows if _row_is_valid(r)]
+    if not accepted:
         return 0
     conn = _connect()
     try:
@@ -70,11 +101,11 @@ def add_samples(rows: list[AggregationRow]) -> int:
             """,
             [
                 (r.driver, r.gp, r.year, r.lap, r.mood, r.mood_rank, r.pace_delta)
-                for r in rows
+                for r in accepted
             ],
         )
         conn.commit()
-        return len(rows)
+        return len(accepted)
     finally:
         conn.close()
 

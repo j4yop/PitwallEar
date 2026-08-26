@@ -30,3 +30,5 @@ running when the button was clicked, and (b) failure feedback was a cryptic
 produce actionable messages naming ./dev.sh; the analysing button shows
 elapsed seconds so slow cold runs don't read as dead. dev.sh waits for API
 readiness before declaring it running. Elapsed-timer item now done.
+2026-08-25 (round 3): elapsed timer shipped with the button fix; API health
+chip added to header. Ticket fully resolved.
