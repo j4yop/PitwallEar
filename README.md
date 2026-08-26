@@ -393,10 +393,29 @@ The `Dockerfile` is a multi-stage build: Node compiles the React app, then
 FastAPI serves the static bundle alongside the API on a single port. This makes
 PitwallEar a one-process deployment with no separate frontend server.
 
-- **Hugging Face Space** — `README.space.md` is the Space card; the Docker SDK
-  runs the image and exposes the app on port `7860`.
 - **Render** — `render.yaml` is a ready web-service definition with a
   `/health` check.
+- **Hugging Face Space** — `README.space.md` is the Space card; the Docker SDK
+  runs the image and exposes the app on port `7860`. Note: Docker Spaces now
+  require an HF PRO subscription.
+
+### Memory-constrained hosting (Render free tier)
+
+Render's free plan caps containers at **512 MB RAM** — too small for real
+transformer weights (RoBERTa-base alone needs ~500 MB fp32). Loading them
+OOM-kills the container mid-request, which shows up as random 502/503s.
+
+`render.yaml` therefore pins production to **degraded-but-honest mode**:
+
+- `PITWALLEAR_ALLOW_DOWNLOAD=0` — models never load; emotion runs via the
+  clearly-labelled keyword fallback (the UI's explainability panel says so)
+- `PITWALLEAR_WARMUP=none` — no eager loading at boot
+
+Everything else stays fully live on the free tier: FastF1 pace, OpenF1 radio
+timelines, cross-model agreement, causal correlation, demo. Full-strength ML
+runs locally, where RAM allows (`PITWALLear_ALLOW_DOWNLOAD=1`). To serve real
+models you need ≥2 GB of container RAM (HF PRO Space, Render Standard, or any
+Docker host) plus `PITWALLEAR_ALLOW_DOWNLOAD=1`.
 
 Build and run locally:
 
