@@ -241,6 +241,13 @@ PITWALLEAR_ALLOW_DOWNLOAD=1
 - `HF_TOKEN` lets the models download with higher rate limits.
 - Without `PITWALLEAR_ALLOW_DOWNLOAD=1`, models load in cache-only mode and
   degrade to a clearly-labelled fallback rather than hanging.
+- `PITWALLEAR_WARMUP` controls startup model pre-loading: `text` (default)
+  warms the text-emotion model, `all` also warms ASR + audio emotion, and
+  `none` skips everything. Memory-constrained hosts (Render free tier,
+  512 MB) must set `none` or the container OOM-crash-loops into 503s.
+- Without an `HF_TOKEN` (or with `LLM_PROVIDER=openai` but no API key) the
+  co-driver summary uses the deterministic fallback immediately instead of
+  spending a network timeout on a call that cannot succeed.
 - `LLM_PROVIDER` switches the orchestrator between `huggingface` (default) and
   `openai`. Every model id is also overridable via `ASR_MODEL`,
   `EMOTION_MODEL`, `TEXT_EMOTION_MODEL`, and `LLM_MODEL`.
