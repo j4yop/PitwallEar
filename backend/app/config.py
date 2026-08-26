@@ -53,5 +53,12 @@ class Settings:
         default_factory=lambda: os.getenv("LLM_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
     )
 
+    # Startup model warm-up: "text" (default), "all" (ASR + audio too), or
+    # "none". Memory-constrained hosts (Render free = 512 MB) must use "none":
+    # eager loading there OOM-crashes the container into a 503 loop.
+    warmup: str = field(
+        default_factory=lambda: os.getenv("PITWALLEAR_WARMUP", "text")
+    )
+
 
 settings = Settings()
