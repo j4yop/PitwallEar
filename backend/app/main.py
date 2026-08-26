@@ -20,6 +20,7 @@ from app.agents.aggregation import (
 )
 from app.agents.explainability import build_explainability
 from app.agents.radio_timeline import RadioTimelineAgent
+from app.config import settings
 from app.schemas import (
     AnalysisResponse,
     CorrelationResult,
@@ -58,13 +59,18 @@ _timeline = RadioTimelineAgent(_emotion)
 
 @app.on_event("startup")
 def _warm_up_models() -> None:
-    """Pre-load the text emotion model so the first /analyse-text request is fast.
+    """Pre-load models so first requests aren't cold.
 
-    The text pipeline is the one the Demo/Text paths depend on; without a warm-up
-    the first request triggers a 30-40s model download/load inside the handler,
-    which surfaces as a proxy timeout (502) in the frontend.
+    Controlled by PITWALLEAR_WARMUP: "text" (default) loads the text-emotion
+    model; "all" also loads ASR and audio emotion; "none" skips everything —
+    required on memory-constrained hosts (Render free tier = 512 MB, where
+    eager loading OOM-crash-loops into permanent 503s).
     """
     import threading
+
+    mode = (settings.warmup or "text").strip().lower()
+    if mode == "none":
+        return
 
     # Import transformers fully in the MAIN thread before any worker/warm-up
     # thread touches it: concurrent first-time imports of its lazy module
@@ -75,15 +81,25 @@ def _warm_up_models() -> None:
     except Exception:
         pass  # Cache-only cold machines still work through fallbacks.
 
-    def _warm_up() -> None:
+    def _warm_text() -> None:
         try:
             _emotion._load_text()
         except Exception:
-            # Cache-only mode can legitimately fail on a cold machine; the request
-            # path will then fall back to the keyword classifier.
+            pass  # Cache-only cold machines fall back to keywords.
+
+    def _warm_audio() -> None:
+        try:
+            _transcription._load()
+        except Exception:
+            pass
+        try:
+            _emotion._load_audio()
+        except Exception:
             pass
 
-    threading.Thread(target=_warm_up, daemon=True).start()
+    threading.Thread(target=_warm_text, daemon=True).start()
+    if mode == "all":
+        threading.Thread(target=_warm_audio, daemon=True).start()
 
 
 class TextRequest(BaseModel):

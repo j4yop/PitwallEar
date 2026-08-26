@@ -9,4 +9,8 @@ services:
         sync: false
       - key: PITWALLEAR_ALLOW_DOWNLOAD
         value: "1"
+      # Free tier has 512 MB RAM: eager model loading OOM-crash-loops the
+      # container into permanent 503s. Models load lazily per request instead.
+      - key: PITWALLEAR_WARMUP
+        value: "none"
     autoDeploy: true

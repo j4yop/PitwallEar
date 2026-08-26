@@ -115,8 +115,14 @@ class Orchestrator:
         )
 
     def _call_llm(self, prompt: str) -> str:
+        # No credentials = the call can only fail; skip straight to the
+        # deterministic fallback instead of burning a timeout every analysis.
         if settings.llm_provider == "openai":
+            if not settings.openai_api_key:
+                raise RuntimeError("no openai credentials configured")
             return self._call_openai(prompt)
+        if not settings.hf_token:
+            raise RuntimeError("no HF token configured")
         return self._call_huggingface(prompt)
 
     @staticmethod
