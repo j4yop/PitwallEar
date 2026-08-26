@@ -35,13 +35,16 @@ class TranscriptionAgent:
             try:
                 from transformers import pipeline
 
-                # Cache-only by default, mirroring EmotionAgent: a cold machine
-                # must fail fast instead of downloading inside a request handler.
+                # Cache-only by default, mirroring EmotionAgent. Implemented via
+                # HF_HUB_OFFLINE rather than pipeline(local_files_only=...) —
+                # that kwarg leaks into Whisper's generate() call and raises
+                # ValueError on every inference in current transformers versions.
+                if not self._allow_download():
+                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
                 self._pipeline = pipeline(
                     "automatic-speech-recognition",
                     model=self.model_name,
                     token=settings.hf_token or None,
-                    local_files_only=not self._allow_download(),
                 )
             except Exception as exc:
                 self._load_failed = True
@@ -52,7 +55,14 @@ class TranscriptionAgent:
         """Transcribe an audio file to text."""
         try:
             asr = self._load()
-            result = asr(audio_path)
+            # Team radio is English; forcing the language stops multilingual
+            # Whisper from misdetecting short noisy clips as silence.
+            kwargs = (
+                {"generate_kwargs": {"language": "en", "task": "transcribe"}}
+                if "whisper" in self.model_name.lower()
+                else {}
+            )
+            result = asr(audio_path, **kwargs)
             text = result.get("text", "").strip()
             return TranscriptionResult(text=text, model=self.model_name)
         except Exception as exc:

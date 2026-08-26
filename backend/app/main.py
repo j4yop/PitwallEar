@@ -62,10 +62,18 @@ def _warm_up_models() -> None:
 
     The text pipeline is the one the Demo/Text paths depend on; without a warm-up
     the first request triggers a 30-40s model download/load inside the handler,
-    which surfaces as a proxy timeout (502) in the frontend. The model is loaded
-    here, in the background, so a slow download never blocks startup.
+    which surfaces as a proxy timeout (502) in the frontend.
     """
     import threading
+
+    # Import transformers fully in the MAIN thread before any worker/warm-up
+    # thread touches it: concurrent first-time imports of its lazy module
+    # graph can leave a partially-initialized module behind on 3.13
+    # ("cannot import name 'pipeline'").
+    try:
+        import transformers  # noqa: F401
+    except Exception:
+        pass  # Cache-only cold machines still work through fallbacks.
 
     def _warm_up() -> None:
         try:
