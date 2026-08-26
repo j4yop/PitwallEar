@@ -23,6 +23,7 @@ import tempfile
 
 import numpy as np
 
+from app.agents._memory import maybe_quantize_pipeline
 from app.config import settings
 from app.schemas import EmotionResult, Mood
 
@@ -136,10 +137,12 @@ class EmotionAgent:
                 # pipeline(local_files_only=...) kwarg leaks into model calls.
                 if not self._allow_download():
                     os.environ.setdefault("HF_HUB_OFFLINE", "1")
-                self._audio_classifier = pipeline(
-                    "audio-classification",
-                    model=self.audio_model,
-                    token=settings.hf_token or None,
+                self._audio_classifier = maybe_quantize_pipeline(
+                    pipeline(
+                        "audio-classification",
+                        model=self.audio_model,
+                        token=settings.hf_token or None,
+                    )
                 )
             except Exception:
                 self._audio_load_failed = True
@@ -154,11 +157,13 @@ class EmotionAgent:
             try:
                 if not self._allow_download():
                     os.environ.setdefault("HF_HUB_OFFLINE", "1")
-                self._text_classifier = pipeline(
-                    "text-classification",
-                    model=self.text_model,
-                    token=settings.hf_token or None,
-                    top_k=None,
+                self._text_classifier = maybe_quantize_pipeline(
+                    pipeline(
+                        "text-classification",
+                        model=self.text_model,
+                        token=settings.hf_token or None,
+                        top_k=None,
+                    )
                 )
             except Exception:
                 self._text_load_failed = True

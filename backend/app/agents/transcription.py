@@ -6,6 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from app.agents._memory import maybe_quantize_pipeline
 from app.config import settings
 from app.schemas import TranscriptionResult
 
@@ -41,10 +42,12 @@ class TranscriptionAgent:
                 # ValueError on every inference in current transformers versions.
                 if not self._allow_download():
                     os.environ.setdefault("HF_HUB_OFFLINE", "1")
-                self._pipeline = pipeline(
-                    "automatic-speech-recognition",
-                    model=self.model_name,
-                    token=settings.hf_token or None,
+                self._pipeline = maybe_quantize_pipeline(
+                    pipeline(
+                        "automatic-speech-recognition",
+                        model=self.model_name,
+                        token=settings.hf_token or None,
+                    )
                 )
             except Exception as exc:
                 self._load_failed = True
