@@ -22,3 +22,11 @@ backend error detail surfaced, season input validated.
 2026-08-25 (PR 2): redundant vite proxy entries removed, tsconfig
 noUnusedLocals/noUnusedParameters/noFallthroughCasesInSwitch enabled.
 Still open: elapsed-time counter on the analysing button.
+2026-08-25 (bug report "analysis button did nothing"): Diagnosed with a
+Playwright loop driving the real UI. Root causes: (a) servers were not
+running when the button was clicked, and (b) failure feedback was a cryptic
+"Request failed: 500" that reset instantly. Fixed: header chip now heartbeats
+/health and shows "API offline - run ./dev.sh" persistently; fetch failures
+produce actionable messages naming ./dev.sh; the analysing button shows
+elapsed seconds so slow cold runs don't read as dead. dev.sh waits for API
+readiness before declaring it running. Elapsed-timer item now done.

@@ -8,9 +8,24 @@ import type { AnalysisResponse, Mode } from "./constants";
 const ANALYSIS_TIMEOUT_MS = 120_000;
 
 async function fetchOrThrow(url: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(url, init);
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch {
+    // Network-level failure: the dev server itself is unreachable (stale tab).
+    throw new Error(
+      "Can't reach the app server. Restart both servers with ./dev.sh from the repo root and reload this page."
+    );
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    // A 5xx whose body isn't JSON is the Vite proxy failing to reach the
+    // backend, not the API answering — tell the user how to fix it.
+    if (res.status >= 500 && !body.trim().startsWith("{")) {
+      throw new Error(
+        "Backend API is not responding (the dashboard loaded, but the API on :8000 didn't answer). Start it with ./dev.sh, then run again."
+      );
+    }
     throw new Error(body || `Request failed: ${res.status}`);
   }
   return res;
@@ -28,6 +43,32 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [error, setError] = useState("");
+  const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  // Heartbeat the API so "Run analysis" never fails silently: the header chip
+  // shows at a glance whether the backend is up.
+  useEffect(() => {
+    let alive = true;
+    const ping = () =>
+      fetch("/health")
+        .then((r) => alive && setApiOnline(r.ok))
+        .catch(() => alive && setApiOnline(false));
+    ping();
+    const t = setInterval(ping, 10_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+
+  // Elapsed counter so a slow (normal!) analysis doesn't read as "nothing is
+  // happening". Cold FastF1 downloads routinely take 30-60s.
+  useEffect(() => {
+    if (!loading) return;
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [loading]);
 
   const abortRef = useRef<AbortController | null>(null);
   const runIdRef = useRef(0);
@@ -64,6 +105,7 @@ export default function App() {
     setLoading(true);
     setError("");
     setResult(null);
+    setElapsed(0);
 
     const timeout = setTimeout(() => {
       cancelReasonRef.current = "timeout";
@@ -127,9 +169,22 @@ export default function App() {
           </div>
           <div className="brand-tag">Race Engineer Co-Pilot</div>
         </div>
-        <div className="live-chip">
-          <span className="live-dot" />
-          {result ? "Analysis complete" : "Ready"}
+        <div className="live-chip" title={apiOnline === false ? "The API on :8000 is not responding — start it with ./dev.sh" : undefined}>
+          <span
+            className="live-dot"
+            style={
+              apiOnline === false
+                ? { background: "var(--red)", boxShadow: "0 0 8px var(--red)" }
+                : undefined
+            }
+          />
+          {apiOnline === false
+            ? "API offline — run ./dev.sh"
+            : result
+              ? "Analysis complete"
+              : loading
+                ? `Analysing… ${elapsed}s`
+                : "Ready"}
         </div>
       </header>
 
@@ -141,6 +196,7 @@ export default function App() {
         year={year}
         audio={audio}
         loading={loading}
+        elapsed={elapsed}
         onModeChange={handleModeChange}
         onTextChange={setText}
         onDriverChange={setDriver}
