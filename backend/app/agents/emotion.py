@@ -132,13 +132,14 @@ class EmotionAgent:
             from transformers import pipeline
 
             try:
+                # Cache-only via HF_HUB_OFFLINE (see TranscriptionAgent): the
+                # pipeline(local_files_only=...) kwarg leaks into model calls.
+                if not self._allow_download():
+                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
                 self._audio_classifier = pipeline(
                     "audio-classification",
                     model=self.audio_model,
                     token=settings.hf_token or None,
-                    # Cache-only by default so a cold machine fails fast rather than
-                    # downloading hundreds of MB inside a request handler.
-                    local_files_only=not self._allow_download(),
                 )
             except Exception:
                 self._audio_load_failed = True
@@ -151,12 +152,13 @@ class EmotionAgent:
             from transformers import pipeline
 
             try:
+                if not self._allow_download():
+                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
                 self._text_classifier = pipeline(
                     "text-classification",
                     model=self.text_model,
                     token=settings.hf_token or None,
                     top_k=None,
-                    local_files_only=not self._allow_download(),
                 )
             except Exception:
                 self._text_load_failed = True

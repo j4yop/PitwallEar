@@ -9,6 +9,7 @@ interface Props {
   year: number;
   audio: File | null;
   loading: boolean;
+  elapsed: number;
   onModeChange: (mode: Mode) => void;
   onTextChange: (text: string) => void;
   onDriverChange: (driver: string) => void;
@@ -26,6 +27,7 @@ export const ControlDeck = memo(function ControlDeck({
   year,
   audio,
   loading,
+  elapsed,
   onModeChange,
   onTextChange,
   onDriverChange,
@@ -118,7 +120,7 @@ export const ControlDeck = memo(function ControlDeck({
         {mode === "live"
           ? "Streaming automatically"
           : loading
-            ? "Analysing…"
+            ? `Analysing… ${elapsed}s (cold runs can take a minute)`
             : "Run analysis →"}
       </button>
     </div>

@@ -257,6 +257,52 @@ lap times.
 
 ---
 
+## Troubleshooting
+
+**The Run button says "API offline" or complains about :8000.**
+The backend isn't running. Start both servers with `./dev.sh` from the repo
+root and wait for the `API is up` line before clicking Run. The header chip
+heartbeats `/health` every 10 seconds, so it always shows whether the API is
+reachable.
+
+**The button says "Analysing… 40s" and keeps counting.**
+That's normal on first use: the text-emotion model loads (~10–30s), FastF1
+downloads race data (~30–60s per session, cached afterwards in
+`backend/.cache/fastf1`), and radio clips download + transcribe. Later runs of
+the same race are much faster thanks to the caches. If it exceeds ~2 minutes,
+check the backend terminal for errors.
+
+**Analysis returns but correlation is `null`.**
+This is honest, not broken. Correlation needs at least 4 laps that have *both*
+a radio mood label and a clean lap time. Unknown drivers (not in the roster),
+races without free radio data, or constant mood series all report `null` with
+the reason in `correlation.reasoning`.
+
+**Models won't load / everything falls back to "keyword-fallback".**
+By default models load cache-only so nothing hangs. To allow downloads, set in
+`backend/.env`:
+
+```
+HF_TOKEN=hf_...
+PITWALLEAR_ALLOW_DOWNLOAD=1
+```
+
+then restart. First download is several hundred MB; it lands in the HF cache,
+not the repo.
+
+**Port already in use.**
+`./dev.sh` fails if something else holds :8000 or :5173. Kill the stale
+process (`lsof -nP -iTCP:8000 -sTCP:LISTEN`) or change the port in `dev.sh`
+(backend) / `vite.config.ts` (frontend).
+
+**Where does my data go?**
+Lap times come from FastF1 (F1 official timing), radio from OpenF1, both free
+public APIs. Caches live in `backend/.cache/` (gitignored); the pooled stats
+store is `backend/data/aggregation.db`. Nothing is sent anywhere except to
+those APIs and — if configured — the LLM provider.
+
+---
+
 ## API reference
 
 | Method | Path | Description |

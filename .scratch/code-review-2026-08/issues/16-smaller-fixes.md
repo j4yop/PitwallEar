@@ -1,6 +1,6 @@
 # Smaller correctness fixes queued from review
 
-Status: ready-for-agent
+Status: resolved
 
 Deferred smaller items:
 - NaT lap-start slips through hasattr(ts,"total_seconds") guard and misassigns
@@ -27,3 +27,9 @@ multi-class calibration via calibrate_from_scores (log-prob temperature
 scaling) replacing the binary-logit formula; upstream query params quoted,
 year cast to int. Still open: SSE streamed timeline laps always 0;
 arbitrary driver/gp/year rows in the aggregation DB (needs an allowlist).
+2026-08-25 (round 3): SSE lap alignment DONE - the stream engine fetches
+FastF1 lap starts once per session and maps clip timestamps to real laps;
+unaligned points are labelled "openf1-live-unaligned" instead of faking a
+lap. Aggregation DB allowlist DONE - add_samples rejects unknown driver
+codes, out-of-range years, invalid laps and unknown moods (tested). Both
+remaining items closed.

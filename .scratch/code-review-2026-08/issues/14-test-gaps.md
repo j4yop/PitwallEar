@@ -1,6 +1,6 @@
 # Test coverage gaps: aggregation module + weak math assertions
 
-Status: ready-for-agent
+Status: resolved
 
 - `app/agents/aggregation.py` has zero tests despite backing /aggregation,
   the headline significance layer. Needs hermetic tests with a tmp-path DB:
@@ -21,3 +21,6 @@ row building; monotonic correlation fixture now asserts r > 0.9; agreement
 0.75 boundary tested; degenerate pearson tested; risk-lead significance
 gating tested; bidirectional Granger/TE direction tests added; independent-
 series and dof-floor tests added. Still open: live_stream poll_once dedupe.
+2026-08-25 (round 3): live_stream poll_once dedupe now tested via a stubbed
+engine subclass (second poll yields 0 new clips), plus real-lap alignment
+tests, unalignable-label test, and FastF1-degradation test. All gaps closed.
