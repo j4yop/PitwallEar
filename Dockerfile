@@ -22,6 +22,15 @@ WORKDIR /app/backend
 RUN pip install --no-cache-dir -e ".[pace,audio]" \
     --extra-index-url https://download.pytorch.org/whl/cpu
 
+# Bake the text-emotion model into the image: free-tier hosts have ephemeral
+# disks, so without this every restart re-downloads ~500 MB from the HF hub
+# and the first analysis after each deploy pays a multi-minute penalty.
+# Kept to the text model — the audio models would push the image past ~2 GB
+# and their RAM footprint exceeds the 512 MB tier anyway.
+ENV HF_HUB_DISABLE_TELEMETRY=1
+RUN python -c "from transformers import pipeline; pipeline('text-classification', model='cardiffnlp/twitter-roberta-base-emotion', top_k=None)" \
+    && python -c "from transformers import __version__ as v; print('transformers', v)"
+
 ENV PYTHONUNBUFFERED=1
 EXPOSE 7860
 
