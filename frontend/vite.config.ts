@@ -7,6 +7,7 @@ export default defineConfig({
     proxy: {
       "/demo": "http://localhost:8000",
       "/timeline": "http://localhost:8000",
+      "/analyse-text": "http://localhost:8000",
       "/analyse": "http://localhost:8000",
       "/health": "http://localhost:8000",
       "/live": "http://localhost:8000",

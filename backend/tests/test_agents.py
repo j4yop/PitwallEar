@@ -31,6 +31,16 @@ def test_text_mood_mapping():
     assert EmotionAgent._text_to_mood("anger") == "Stressed"
     assert EmotionAgent._text_to_mood("sadness") == "Tired"
     assert EmotionAgent._text_to_mood("joy") == "Calm"
+    assert EmotionAgent._text_to_mood("optimism") == "Calm"
+
+
+def test_classify_text_tones_fallback_and_keywords():
+    emo = EmotionAgent()
+    assert emo._keyword_fallback("i am angry")[0] == "Stressed"
+    assert emo._keyword_fallback("The rears are gone, no grip")[0] == "Stressed"
+    assert emo._keyword_fallback("Balance is good, pace steady")[0] == "Calm"
+    assert emo._keyword_fallback("Exhausted and tired")[0] == "Tired"
+    assert emo._keyword_fallback("Radio check 1 2 3")[0] == "Neutral"
 
 
 def test_agreement_score_same_and_opposite():
