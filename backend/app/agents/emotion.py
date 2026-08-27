@@ -113,6 +113,9 @@ def calibrate_from_scores(scores: dict[str, float], top_label: str) -> float:
     return round(float(soft[idx]), 3)
 
 
+_TWEETEVAL_ID2LABEL = {0: "anger", 1: "joy", 2: "optimism", 3: "sadness"}
+
+
 class EmotionAgent:
     """Classifies driver mood from raw audio and/or transcript text."""
 
@@ -157,14 +160,16 @@ class EmotionAgent:
             try:
                 if not self._allow_download():
                     os.environ.setdefault("HF_HUB_OFFLINE", "1")
-                self._text_classifier = maybe_quantize_pipeline(
-                    pipeline(
-                        "text-classification",
-                        model=self.text_model,
-                        token=settings.hf_token or None,
-                        top_k=None,
-                    )
+                pipe = pipeline(
+                    "text-classification",
+                    model=self.text_model,
+                    token=settings.hf_token or None,
+                    top_k=None,
                 )
+                if "twitter-roberta-base-emotion" in self.text_model and hasattr(pipe, "model"):
+                    pipe.model.config.id2label = _TWEETEVAL_ID2LABEL
+                    pipe.model.config.label2id = {v: k for k, v in _TWEETEVAL_ID2LABEL.items()}
+                self._text_classifier = maybe_quantize_pipeline(pipe)
             except Exception:
                 self._text_load_failed = True
         if self._text_load_failed:
@@ -232,10 +237,20 @@ class EmotionAgent:
             top = max(predictions, key=lambda p: p.get("score", 0.0))
             raw_label = top.get("label", "").lower()
             confidence = float(top.get("score", 0.0))
-            mood = self._text_to_mood(raw_label)
             scores = {str(p.get("label", "")): float(p.get("score", 0.0)) for p in predictions}
             calibrated = calibrate_from_scores(scores, str(top.get("label", "")))
-            reasoning = self._text_reasoning(raw_label, calibrated)
+            kw_mood, _, _ = self._keyword_fallback(text)
+
+            if calibrated < 0.48 and kw_mood == "Neutral":
+                mood = "Neutral"
+                reasoning = "Diffuse transcript emotion; classified as Neutral procedural message."
+            elif kw_mood in ("Stressed", "Tired", "Calm") and calibrated < 0.52 and self._text_to_mood(raw_label) != kw_mood:
+                mood = kw_mood
+                reasoning = f"Transcript signals {kw_mood.lower()} tone from domain keywords ({raw_label} at {calibrated:.0%})."
+            else:
+                mood = self._text_to_mood(raw_label)
+                reasoning = self._text_reasoning(raw_label, calibrated)
+
             return EmotionResult(
                 mood=mood,
                 confidence=confidence,
