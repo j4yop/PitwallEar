@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { GooeyTextReveal } from "@/components/ui/gooey-text-reveal";
 import { MOOD_CLASS } from "./constants";
 
 interface LiveTimelinePoint {
@@ -103,7 +104,7 @@ export function LiveView({
 
         <div className="panel">
           <div className="panel-head">
-            <h2>Stream status</h2>
+            <h2><GooeyTextReveal mode="immediate">Stream status</GooeyTextReveal></h2>
             <span className={`live-chip ${connected ? "" : "off"}`}>
               <span className="live-dot" />
               {connected ? "Connected" : "Waiting"}
@@ -128,7 +129,7 @@ export function LiveView({
 
       <div className="panel">
         <div className="panel-head">
-          <h2>Growing mood timeline</h2>
+          <h2><GooeyTextReveal mode="immediate">Growing mood timeline</GooeyTextReveal></h2>
           <span className="mono-note">{timeline.length} labelled clips</span>
         </div>
         <div className="panel-body">

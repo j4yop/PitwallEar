@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { GooeyTextReveal } from "@/components/ui/gooey-text-reveal";
 import { LapTimesChart, StressPaceChart } from "./Charts";
 import { MOOD_CLASS, type AnalysisResponse } from "./constants";
 
@@ -84,7 +85,7 @@ export function ResultView({ result }: { result: AnalysisResponse }) {
       {result.agreement && (
         <div className="panel" style={{ marginBottom: 16 }}>
           <div className="panel-head">
-            <h2>Cross-model agreement</h2>
+            <h2><GooeyTextReveal mode="immediate">Cross-model agreement</GooeyTextReveal></h2>
             <span className={`agreement-badge ${result.agreement.agrees ? "agree" : "disagree"}`}>
               {result.agreement.agrees ? "Agree" : "Disagree"}{" "}
               {(result.agreement.agreement_score * 100).toFixed(0)}%
@@ -108,7 +109,7 @@ export function ResultView({ result }: { result: AnalysisResponse }) {
       <div className="grid-2" style={{ marginBottom: 16 }}>
         <div className="panel">
           <div className="panel-head">
-            <h2>Transcript</h2>
+            <h2><GooeyTextReveal mode="immediate">Transcript</GooeyTextReveal></h2>
           </div>
           <div className="panel-body">
             <p className="insight-quote">{result.transcription.text || "(empty)"}</p>
@@ -120,7 +121,7 @@ export function ResultView({ result }: { result: AnalysisResponse }) {
 
         <div className="panel">
           <div className="panel-head">
-            <h2>Co-driver call</h2>
+            <h2><GooeyTextReveal mode="immediate">Co-driver call</GooeyTextReveal></h2>
           </div>
           <div className="panel-body">
             <p className="insight-quote">{result.insight.summary}</p>
@@ -136,7 +137,7 @@ export function ResultView({ result }: { result: AnalysisResponse }) {
       <div className="grid-2" style={{ marginBottom: 16 }}>
         <div className="panel">
           <div className="panel-head">
-            <h2>Lap times</h2>
+            <h2><GooeyTextReveal mode="immediate">Lap times</GooeyTextReveal></h2>
           </div>
           <div className="panel-body">
             <LapTimesChart data={lapData} />
@@ -149,7 +150,7 @@ export function ResultView({ result }: { result: AnalysisResponse }) {
 
         <div className="panel">
           <div className="panel-head">
-            <h2>Stress vs baseline pace</h2>
+            <h2><GooeyTextReveal mode="immediate">Stress vs baseline pace</GooeyTextReveal></h2>
           </div>
           <div className="panel-body">
             <StressPaceChart data={correlationData} />
@@ -164,7 +165,7 @@ export function ResultView({ result }: { result: AnalysisResponse }) {
       {timelineData.length > 0 && (
         <div className="panel" style={{ marginBottom: 16 }}>
           <div className="panel-head">
-            <h2>Radio mood timeline</h2>
+            <h2><GooeyTextReveal mode="immediate">Radio mood timeline</GooeyTextReveal></h2>
             <span className="mono-note">
               {result.correlation?.sample_size ?? 0} labelled laps
             </span>
@@ -195,7 +196,7 @@ export function ResultView({ result }: { result: AnalysisResponse }) {
 
       <div className="panel">
         <div className="panel-head">
-          <h2>Method note</h2>
+          <h2><GooeyTextReveal mode="immediate">Method note</GooeyTextReveal></h2>
         </div>
         <div className="panel-body">
           <p className="mono-note">
@@ -215,7 +216,7 @@ export function ResultView({ result }: { result: AnalysisResponse }) {
       {result.correlation?.causal && (
         <div className="panel" style={{ marginTop: 16 }}>
           <div className="panel-head">
-            <h2>Causal lead-lag analysis</h2>
+            <h2><GooeyTextReveal mode="immediate">Causal lead-lag analysis</GooeyTextReveal></h2>
             <span className="mono-note">
               {result.correlation.causal.method.replace("_", " ")}
             </span>
@@ -238,7 +239,7 @@ export function ResultView({ result }: { result: AnalysisResponse }) {
       {result.explainability && result.explainability.failure_modes.length > 0 && (
         <div className="panel" style={{ marginTop: 16 }}>
           <div className="panel-head">
-            <h2>Honest failure modes</h2>
+            <h2><GooeyTextReveal mode="immediate">Honest failure modes</GooeyTextReveal></h2>
           </div>
           <div className="panel-body">
             {result.explainability.failure_modes.map((mode) => (

@@ -24,7 +24,7 @@ Python venv lives at `backend/.venv` (created from `backend/pyproject.toml`). Co
 
 - Backend: Python 3.10+, FastAPI, Pydantic v2 schemas in `app/schemas.py`, one agent per file in `app/agents/`
 - Agents degrade gracefully instead of throwing — keep fallbacks labelled and honest
-- Frontend: React 18 + TypeScript, single-page dashboard in `src/App.tsx`, Vite dev proxy targets `:8000`
+- Frontend: React 18 + TypeScript, marketing landing at `/` (`src/pages/Landing.tsx`, Tailwind v4 + shadcn structure under `src/components/ui/`); original dashboard at `/dashboard` (`src/App.tsx`, legacy CSS in `src/dashboard.css`), Vite dev proxy targets `:8000`
 
 ## Agent skills
 

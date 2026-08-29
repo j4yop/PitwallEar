@@ -1331,7 +1331,7 @@ export function BooksShowcase({
     }
 
     // Frame loop
-    const timer = new THREE.Timer();
+    const timer = new (THREE as any).Timer();
     timer.connect(document);
     const idle = RM ? 0 : 1;
     const DETAIL_OPEN_ANGLE = 0.88;

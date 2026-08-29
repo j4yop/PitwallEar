@@ -1,5 +1,7 @@
 import { memo } from "react";
-import { MODE_HELP, MODE_KEYS, MODE_LABELS, MODES, type Mode } from "./constants";
+import { PopButton } from "@/components/ui/pop-button";
+import { CornerButton } from "@/components/ui/corner-button";
+import { MODE_HELP, MODE_LABELS, MODES, type Mode } from "./constants";
 
 interface Props {
   mode: Mode;
@@ -19,6 +21,20 @@ interface Props {
   onRun: () => void;
 }
 
+const MODE_ACCENT: Record<Mode, string> = {
+  demo: "var(--color-accent)",
+  text: "var(--color-accent)",
+  audio: "var(--color-accent)",
+  live: "var(--color-accent)",
+};
+
+const MODE_HOTKEY: Record<Mode, string> = {
+  demo: "1",
+  text: "2",
+  audio: "3",
+  live: "4",
+};
+
 export const ControlDeck = memo(function ControlDeck({
   mode,
   text,
@@ -36,19 +52,55 @@ export const ControlDeck = memo(function ControlDeck({
   onAudioChange,
   onRun,
 }: Props) {
+  const runLabel =
+    mode === "live"
+      ? "Streaming automatically"
+      : loading
+        ? `Analysing… ${elapsed}s (cold runs take a minute)`
+        : "Run analysis →";
+
   return (
     <div className="control-deck">
       <div className="mode-stack">
-        {MODES.map((m) => (
-          <button
-            key={m}
-            className={`mode-tab ${mode === m ? "active" : ""}`}
-            onClick={() => onModeChange(m)}
-          >
-            {MODE_LABELS[m]}
-            <span className="kbd">{MODE_KEYS[m]}</span>
-          </button>
-        ))}
+        {MODES.map((m) => {
+          const isActive = mode === m;
+          return (
+            <button
+              key={m}
+              onClick={() => onModeChange(m)}
+              data-cursor="link"
+              aria-pressed={isActive}
+              className={`group relative block w-full text-left ${
+                isActive ? "ring-2 ring-[var(--paper-ink,#171b12)]" : ""
+              }`}
+              style={{ background: "transparent", border: "none", padding: 0 }}
+            >
+              <PopButton
+                className="!w-full"
+                style={{
+                  background: isActive ? MODE_ACCENT[m] : "transparent",
+                  color: isActive ? "#fff" : "#171b12",
+                  border: isActive
+                    ? "2px solid #171b12"
+                    : "1px solid #aab29b",
+                  opacity: isActive ? 1 : 0.85,
+                }}
+              >
+                <span className="flex w-full items-center justify-between">
+                  <span className="font-[var(--display)] text-lg font-bold tracking-[0.08em] uppercase">
+                    {MODE_LABELS[m]}
+                  </span>
+                  <span
+                    className="font-mono text-[10px] tracking-widest"
+                    style={{ color: isActive ? "rgba(255,255,255,0.7)" : "#878e7c" }}
+                  >
+                    [{MODE_HOTKEY[m]}]
+                  </span>
+                </span>
+              </PopButton>
+            </button>
+          );
+        })}
         <div className="mode-help">{MODE_HELP[mode]}</div>
       </div>
 
@@ -94,7 +146,6 @@ export const ControlDeck = memo(function ControlDeck({
             type="number"
             value={year}
             onChange={(e) => {
-              // Ignore empty/partial/out-of-range input instead of sending 0 or NaN.
               const n = Number(e.target.value);
               if (Number.isInteger(n) && n >= 2018 && n <= 2100) onYearChange(n);
             }}
@@ -112,17 +163,18 @@ export const ControlDeck = memo(function ControlDeck({
         </div>
       </div>
 
-      <button
-        className="fire-btn"
-        onClick={onRun}
-        disabled={mode === "live" || loading || (mode === "audio" && !audio)}
-      >
-        {mode === "live"
-          ? "Streaming automatically"
-          : loading
-            ? `Analysing… ${elapsed}s (cold runs can take a minute)`
-            : "Run analysis →"}
-      </button>
+      <div className="self-end">
+        <CornerButton
+          onClick={onRun}
+          disabled={mode === "live" || loading || (mode === "audio" && !audio)}
+          accentColor="#ffd60a"
+          showIcon={false}
+        >
+          <span className="font-[var(--display)] text-lg font-bold tracking-[0.08em] uppercase">
+            {runLabel}
+          </span>
+        </CornerButton>
+      </div>
     </div>
   );
 });
