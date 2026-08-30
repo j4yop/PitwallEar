@@ -20,6 +20,7 @@ dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.24.0",
     "scipy>=1.10",
+    "gradio>=4.20.0",
 ]
 
 # Audio (ASR + speech-emotion) and live FastF1 pace data are optional so the

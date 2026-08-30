@@ -3,8 +3,8 @@ title: PitwallEar - The Silent Co-Driver
 emoji: 🎙️
 colorFrom: yellow
 colorTo: green
-sdk: docker
-app_port: 7860
+sdk: gradio
+app_file: app/gradio_app.py
 pinned: false
 ---
 
@@ -24,3 +24,8 @@ run.
 
 Set `HF_TOKEN` in the Space secrets to enable real model downloads; without it
 the pipeline degrades to a clearly-labelled fallback.
+
+Note: the original Docker-based Space was the previous deployment, this
+gradio-based Space is the free-tier friendly variant that runs without a paid
+HF PRO subscription. The FastAPI pipeline is unchanged; this Space just
+exposes it through a Gradio UI.
